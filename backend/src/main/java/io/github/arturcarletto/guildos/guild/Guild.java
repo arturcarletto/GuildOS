@@ -8,8 +8,6 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
@@ -19,7 +17,6 @@ import jakarta.persistence.Version;
 class Guild {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
     @Column(name = "discord_guild_id", nullable = false, updatable = false, length = 32, unique = true)
@@ -52,21 +49,6 @@ class Guild {
     private long version;
 
     protected Guild() {
-    }
-
-    private Guild(String discordGuildId, String name, Instant connectedAt) {
-        this.discordGuildId = discordGuildId;
-        this.name = name;
-        connectionStatus = GuildConnectionStatus.CONNECTED;
-        firstConnectedAt = connectedAt;
-        lastConnectedAt = connectedAt;
-        createdAt = connectedAt;
-        updatedAt = connectedAt;
-    }
-
-    static Guild connected(String discordGuildId, String name, Instant connectedAt) {
-        Objects.requireNonNull(connectedAt, "connectedAt must not be null");
-        return new Guild(discordGuildId, name, connectedAt);
     }
 
     void connect(String name, Instant connectedAt) {

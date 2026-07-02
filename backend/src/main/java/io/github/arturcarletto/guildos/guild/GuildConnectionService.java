@@ -2,6 +2,7 @@ package io.github.arturcarletto.guildos.guild;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,14 +21,15 @@ public class GuildConnectionService {
     @Transactional
     public void connect(ConnectGuildCommand command) {
         Instant connectedAt = clock.instant();
-        Guild guild = repository.findByDiscordGuildId(command.discordGuildId())
-                .map(existing -> {
-                    existing.connect(command.guildName(), connectedAt);
-                    return existing;
-                })
-                .orElseGet(() -> Guild.connected(command.discordGuildId(), command.guildName(), connectedAt));
+        repository.insertIfAbsent(
+                UUID.randomUUID(),
+                command.discordGuildId(),
+                command.guildName(),
+                connectedAt);
 
-        repository.save(guild);
+        Guild guild = repository.findByDiscordGuildId(command.discordGuildId())
+                .orElseThrow(() -> new IllegalStateException("Guild was not available after insert-if-absent"));
+        guild.connect(command.guildName(), connectedAt);
     }
 
     @Transactional

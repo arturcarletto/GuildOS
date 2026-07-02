@@ -2,6 +2,11 @@ package io.github.arturcarletto.guildos.guild;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,6 +63,33 @@ class GuildConnectionServiceIntegrationTest {
         service.connect(command);
 
         assertThat(repository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentConnectionsForANewGuildBothSucceedWithoutCreatingDuplicates() throws Exception {
+        ConnectGuildCommand command = new ConnectGuildCommand("concurrent-1002", "Concurrent Guild");
+        CountDownLatch callersReady = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> first = executor.submit(() -> connectAfterSignal(command, callersReady, start));
+            Future<?> second = executor.submit(() -> connectAfterSignal(command, callersReady, start));
+            assertThat(callersReady.await(5, TimeUnit.SECONDS)).isTrue();
+
+            start.countDown();
+
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+        }
+        finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(repository.count()).isEqualTo(1);
+        Guild guild = repository.findByDiscordGuildId("concurrent-1002").orElseThrow();
+        assertThat(guild.getConnectionStatus()).isEqualTo(GuildConnectionStatus.CONNECTED);
     }
 
     @Test
@@ -122,5 +154,15 @@ class GuildConnectionServiceIntegrationTest {
         service.disconnect(new DisconnectGuildCommand("unknown-guild"));
 
         assertThat(repository.count()).isZero();
+    }
+
+    private Void connectAfterSignal(
+            ConnectGuildCommand command,
+            CountDownLatch callersReady,
+            CountDownLatch start) throws InterruptedException {
+        callersReady.countDown();
+        start.await();
+        service.connect(command);
+        return null;
     }
 }
