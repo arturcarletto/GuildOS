@@ -3,12 +3,16 @@ package io.github.arturcarletto.guildos.discord;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import io.github.arturcarletto.guildos.guild.GuildConnectionService;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class DiscordConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(DiscordConfiguration.class);
+            .withUserConfiguration(DiscordConfiguration.class)
+            .withBean(GuildConnectionService.class, () -> mock(GuildConnectionService.class));
 
     @Test
     void disabledIntegrationDoesNotRequireATokenOrCreateGatewayBeans() {
@@ -19,6 +23,7 @@ class DiscordConfigurationTest {
                     assertThat(context).hasSingleBean(DiscordProperties.class);
                     assertThat(context).doesNotHaveBean(DiscordGateway.class);
                     assertThat(context).doesNotHaveBean(DiscordHealthIndicator.class);
+                    assertThat(context).doesNotHaveBean(DiscordGuildEventListener.class);
                 });
     }
 

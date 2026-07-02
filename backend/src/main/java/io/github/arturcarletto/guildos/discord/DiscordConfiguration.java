@@ -9,15 +9,24 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import io.github.arturcarletto.guildos.guild.GuildConnectionService;
+
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(DiscordProperties.class)
 class DiscordConfiguration {
 
     @Bean
     @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
-    DiscordJdaFactory discordJdaFactory() {
+    DiscordGuildEventListener discordGuildEventListener(GuildConnectionService guildConnectionService) {
+        return new DiscordGuildEventListener(guildConnectionService);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordJdaFactory discordJdaFactory(DiscordGuildEventListener guildEventListener) {
         return token -> JDABuilder.createLight(token, EnumSet.noneOf(GatewayIntent.class))
                 .setAutoReconnect(true)
+                .addEventListeners(guildEventListener)
                 .build();
     }
 

@@ -1,10 +1,10 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend and an optional Discord Gateway connection.
+Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, and a persistent registry of connected guilds.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, a real-database integration test, local Docker Compose infrastructure, backend CI, and a monitored Discord Gateway connection. The Discord integration is disabled by default. Commands, Discord event collection, authentication, community analytics, automation, AI features, and a frontend are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, and a persistent registry of guilds where the bot is installed. The Discord integration is disabled by default. Commands, message and member event collection, authentication, guild onboarding, community analytics, automation, AI features, and a frontend are not implemented yet.
 
 ## Technology stack
 
@@ -110,7 +110,9 @@ Set-Location backend
 .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=local"
 ```
 
-Startup waits until JDA reports the initial Gateway connection as ready. The integration uses no optional Gateway intents and does not require Message Content, Guild Members, or Guild Presences. It does not implement commands or collect Discord events yet.
+Startup waits until JDA reports the initial Gateway connection as ready. The integration then synchronizes the guilds currently available to JDA into PostgreSQL. Guild join events create or reconnect registry entries, and guild leave events mark entries disconnected without deleting their history.
+
+The integration uses no optional Gateway intents and does not require Message Content, Guild Members, or Guild Presences. No guild-management API is exposed yet, and authentication and guild onboarding are not implemented.
 
 Check the existing Actuator health endpoint from another PowerShell window:
 

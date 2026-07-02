@@ -4,7 +4,7 @@
 
 Guild OS starts as one deployable Spring Boot application organized by business capability. A modular monolith keeps local development, testing, deployment, and database consistency straightforward while the product boundaries and workload patterns are still being discovered. Package boundaries can provide separation without introducing network calls, distributed transactions, duplicated operational tooling, or premature service ownership.
 
-The implemented `discord` package is an infrastructure boundary for Gateway configuration, connection lifecycle, and health reporting. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
+The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, and transactional connection use cases. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
 
 ## Intended modules
 
@@ -27,11 +27,14 @@ The application should remain a modular monolith while a single deployment and d
 
 1. Spring binds and validates `guildos.discord` configuration during startup.
 2. When the integration is disabled, no JDA client or Discord health contributor is created.
-3. When enabled, the Discord boundary creates one JDA client with no optional Gateway intents and blocks startup until JDA is connected and ready.
-4. The `discord` Actuator health contributor derives its status from the live JDA connection and reports only the connection status and guild count as details.
-5. During Spring shutdown, the boundary requests a graceful JDA shutdown, waits for a bounded interval, and forces shutdown only if necessary.
+3. When enabled, the Discord boundary creates one JDA client with no optional Gateway intents and blocks startup for at most 30 seconds until JDA is connected and ready.
+4. The registered Discord guild listener synchronizes JDA's current guilds on the ready event and handles explicit guild join and leave events.
+5. Each event follows the same dependency direction: Discord event -> Discord adapter -> guild application service -> PostgreSQL.
+6. The guild service creates or reconnects records on connection and marks existing records disconnected on leave; it never deletes guild history. An unknown leave is an idempotent no-op.
+7. The `discord` Actuator health contributor derives its status from the live JDA connection and reports only the connection status and guild count as details.
+8. During Spring shutdown, the boundary requests a graceful JDA shutdown, waits for a bounded interval, and forces shutdown only if necessary.
 
-The boundary does not register commands or listeners and does not persist Discord events.
+The listener handles only guild ready, join, and leave lifecycle signals. It does not register commands or process message or member events. JDA types remain inside the Discord adapter; the guild application boundary accepts platform-neutral commands.
 
 ## Initial request and database flow
 
