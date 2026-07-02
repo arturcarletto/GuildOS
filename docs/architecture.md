@@ -4,7 +4,7 @@
 
 Guild OS starts as one deployable Spring Boot application organized by business capability. A modular monolith keeps local development, testing, deployment, and database consistency straightforward while the product boundaries and workload patterns are still being discovered. Package boundaries can provide separation without introducing network calls, distributed transactions, duplicated operational tooling, or premature service ownership.
 
-The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, and transactional connection use cases. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
+The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, and transactional connection use cases. The `identity` package owns Discord OAuth client configuration, Spring Security policy, local operator accounts, OAuth profile mapping, authenticated principals, and the current-operator API. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
 
 ## Intended modules
 
@@ -35,6 +35,17 @@ The application should remain a modular monolith while a single deployment and d
 8. During Spring shutdown, the boundary requests a graceful JDA shutdown, waits for a bounded interval, and forces shutdown only if necessary.
 
 The listener handles only guild ready, join, and leave lifecycle signals. It does not register commands or process message or member events. JDA types remain inside the Discord adapter; the guild application boundary accepts platform-neutral commands.
+
+## Operator authentication flow
+
+1. A browser explicitly requests `/oauth2/authorization/discord`.
+2. Spring Security creates the authorization request and OAuth state, then redirects to Discord with only the `identify` scope.
+3. Spring Security handles the authorization-code callback and retrieves Discord user information.
+4. The identity OAuth adapter validates and maps safe profile attributes into a platform-neutral login command.
+5. The identity service creates or updates the operator account in PostgreSQL and returns the local operator identity.
+6. Spring Security stores the authenticated principal in the server-side HTTP session and redirects to `/api/v1/me`.
+
+The dependency direction is: Browser -> Spring Security OAuth2 -> Discord user-info -> identity service -> PostgreSQL -> authenticated session. This human operator OAuth login is separate from the JDA bot Gateway in the `discord` package; the two integrations are enabled independently, and neither depends on the other. Access and refresh tokens are not stored in Guild OS domain tables or exposed through the API. Authentication establishes operator identity only; guild-management authorization and onboarding are not implemented and remain separate future capabilities. Sessions are local to the single application instance and require a deliberate scaling design before multiple instances are deployed.
 
 ## Initial request and database flow
 

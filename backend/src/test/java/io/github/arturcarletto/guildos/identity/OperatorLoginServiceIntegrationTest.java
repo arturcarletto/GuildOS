@@ -1,6 +1,7 @@
 package io.github.arturcarletto.guildos.identity;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -14,7 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 
-import io.github.arturcarletto.guildos.FixedClockTestConfiguration;
+import io.github.arturcarletto.guildos.MutableClockTestConfiguration;
+import io.github.arturcarletto.guildos.MutableTestClock;
 import io.github.arturcarletto.guildos.TestcontainersConfiguration;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,10 +26,11 @@ import static org.assertj.core.api.Assertions.assertThat;
         "guildos.discord.token=",
         "guildos.identity.discord-oauth.enabled=false"
 })
-@Import({TestcontainersConfiguration.class, FixedClockTestConfiguration.class})
+@Import({TestcontainersConfiguration.class, MutableClockTestConfiguration.class})
 class OperatorLoginServiceIntegrationTest {
 
-    private static final Instant NOW = Instant.parse("2026-01-02T03:04:05Z");
+    private static final Instant INSTANT_A = MutableClockTestConfiguration.INITIAL_INSTANT;
+    private static final Instant INSTANT_B = INSTANT_A.plus(90, ChronoUnit.MINUTES);
 
     @Autowired
     private OperatorLoginService service;
@@ -35,8 +38,12 @@ class OperatorLoginServiceIntegrationTest {
     @Autowired
     private OperatorAccountRepository repository;
 
+    @Autowired
+    private MutableTestClock clock;
+
     @BeforeEach
     void clearOperators() {
+        clock.setInstant(INSTANT_A);
         repository.deleteAll();
         repository.flush();
     }
@@ -50,10 +57,10 @@ class OperatorLoginServiceIntegrationTest {
         assertThat(account.getUsername()).isEqualTo("operator");
         assertThat(account.getGlobalDisplayName()).isEqualTo("Operator One");
         assertThat(account.getAvatarHash()).isEqualTo("avatar-hash");
-        assertThat(account.getFirstLoginAt()).isEqualTo(NOW);
-        assertThat(account.getLastLoginAt()).isEqualTo(NOW);
-        assertThat(account.getCreatedAt()).isEqualTo(NOW);
-        assertThat(account.getUpdatedAt()).isEqualTo(NOW);
+        assertThat(account.getFirstLoginAt()).isEqualTo(INSTANT_A);
+        assertThat(account.getLastLoginAt()).isEqualTo(INSTANT_A);
+        assertThat(account.getCreatedAt()).isEqualTo(INSTANT_A);
+        assertThat(account.getUpdatedAt()).isEqualTo(INSTANT_A);
     }
 
     @Test
@@ -61,20 +68,23 @@ class OperatorLoginServiceIntegrationTest {
         service.login(command("operator-2", "old-name", "Old Display"));
         OperatorAccount firstLogin = repository.findByDiscordUserId("operator-2").orElseThrow();
         UUID id = firstLogin.getId();
-        Instant firstLoginAt = firstLogin.getFirstLoginAt();
-        Instant createdAt = firstLogin.getCreatedAt();
+        assertThat(firstLogin.getFirstLoginAt()).isEqualTo(INSTANT_A);
+        assertThat(firstLogin.getCreatedAt()).isEqualTo(INSTANT_A);
+        assertThat(firstLogin.getLastLoginAt()).isEqualTo(INSTANT_A);
+        assertThat(firstLogin.getUpdatedAt()).isEqualTo(INSTANT_A);
 
+        clock.setInstant(INSTANT_B);
         service.login(new OperatorLoginCommand("operator-2", "new-name", "New Display", "new-avatar"));
 
         OperatorAccount repeatedLogin = repository.findByDiscordUserId("operator-2").orElseThrow();
         assertThat(repeatedLogin.getId()).isEqualTo(id);
-        assertThat(repeatedLogin.getFirstLoginAt()).isEqualTo(firstLoginAt);
-        assertThat(repeatedLogin.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(repeatedLogin.getFirstLoginAt()).isEqualTo(INSTANT_A);
+        assertThat(repeatedLogin.getCreatedAt()).isEqualTo(INSTANT_A);
+        assertThat(repeatedLogin.getLastLoginAt()).isEqualTo(INSTANT_B);
+        assertThat(repeatedLogin.getUpdatedAt()).isEqualTo(INSTANT_B);
         assertThat(repeatedLogin.getUsername()).isEqualTo("new-name");
         assertThat(repeatedLogin.getGlobalDisplayName()).isEqualTo("New Display");
         assertThat(repeatedLogin.getAvatarHash()).isEqualTo("new-avatar");
-        assertThat(repeatedLogin.getLastLoginAt()).isEqualTo(NOW);
-        assertThat(repeatedLogin.getUpdatedAt()).isEqualTo(NOW);
     }
 
     @Test
