@@ -1,0 +1,25 @@
+# Build output
+backend/target/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDEs and editors
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+
+# Operating systems
+.DS_Store
+Thumbs.db
+
+# Logs and runtime files
+*.log
+*.pid
+hs_err_pid*
+
