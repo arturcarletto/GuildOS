@@ -4,7 +4,7 @@
 
 Guild OS starts as one deployable Spring Boot application organized by business capability. A modular monolith keeps local development, testing, deployment, and database consistency straightforward while the product boundaries and workload patterns are still being discovered. Package boundaries can provide separation without introducing network calls, distributed transactions, duplicated operational tooling, or premature service ownership.
 
-Only the root application package exists in this bootstrap. Feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
+The implemented `discord` package is an infrastructure boundary for Gateway configuration, connection lifecycle, and health reporting. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
 
 ## Intended modules
 
@@ -23,6 +23,16 @@ These names describe expected architectural boundaries, not implemented features
 
 The application should remain a modular monolith while a single deployment and database satisfy reliability, scale, and team ownership needs. Module boundaries can be reinforced with architecture tests and module-specific migrations as code appears. A capability should be extracted into a separate service only when measured scaling, isolation, deployment cadence, or ownership requirements justify the operational cost. Asynchronous messaging and separate data ownership should be introduced with such an extraction, not in anticipation of one.
 
+## Discord Gateway runtime flow
+
+1. Spring binds and validates `guildos.discord` configuration during startup.
+2. When the integration is disabled, no JDA client or Discord health contributor is created.
+3. When enabled, the Discord boundary creates one JDA client with no optional Gateway intents and blocks startup until JDA is connected and ready.
+4. The `discord` Actuator health contributor derives its status from the live JDA connection and reports only the connection status and guild count as details.
+5. During Spring shutdown, the boundary requests a graceful JDA shutdown, waits for a bounded interval, and forces shutdown only if necessary.
+
+The boundary does not register commands or listeners and does not persist Discord events.
+
 ## Initial request and database flow
 
 1. An HTTP request reaches the embedded web server and Spring MVC routing.
@@ -31,4 +41,3 @@ The application should remain a modular monolith while a single deployment and d
 4. PostgreSQL commits the transaction and the web layer returns the result.
 
 At startup, Flyway connects before JPA initialization, ensures the `guild_os` migration schema exists, and applies versioned migrations. Hibernate then validates mapped entities against that schema with `ddl-auto: validate`; it does not create or modify tables. The initial migration creates only the `guild_os` schema. Actuator supplies the standard health endpoint without a custom controller.
-

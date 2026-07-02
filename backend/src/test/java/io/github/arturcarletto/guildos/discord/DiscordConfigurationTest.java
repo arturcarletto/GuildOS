@@ -1,0 +1,47 @@
+package io.github.arturcarletto.guildos.discord;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class DiscordConfigurationTest {
+
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withUserConfiguration(DiscordConfiguration.class);
+
+    @Test
+    void disabledIntegrationDoesNotRequireATokenOrCreateGatewayBeans() {
+        contextRunner
+                .withPropertyValues("guildos.discord.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(DiscordProperties.class);
+                    assertThat(context).doesNotHaveBean(DiscordGateway.class);
+                    assertThat(context).doesNotHaveBean(DiscordHealthIndicator.class);
+                });
+    }
+
+    @Test
+    void enabledIntegrationRejectsABlankToken() {
+        contextRunner
+                .withPropertyValues(
+                        "guildos.discord.enabled=true",
+                        "guildos.discord.token=   ")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasStackTraceContaining(
+                                    "guildos.discord.token must be configured when guildos.discord.enabled=true");
+                });
+    }
+
+    @Test
+    void propertiesDoNotExposeTheTokenInTheirStringRepresentation() {
+        DiscordProperties properties = new DiscordProperties(true, "secret-test-token");
+
+        assertThat(properties.toString())
+                .contains("enabled=true", "tokenConfigured=true")
+                .doesNotContain("secret-test-token");
+    }
+}

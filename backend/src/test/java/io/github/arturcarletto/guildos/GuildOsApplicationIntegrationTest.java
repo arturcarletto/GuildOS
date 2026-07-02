@@ -3,17 +3,24 @@ package io.github.arturcarletto.guildos;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "guildos.discord.enabled=false",
+        "guildos.discord.token="
+})
 @Import(TestcontainersConfiguration.class)
 class GuildOsApplicationIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ApplicationContext applicationContext;
 
     @Test
     void applicationStartsAndFlywayCreatesTheApplicationSchema() {
@@ -26,6 +33,6 @@ class GuildOsApplicationIntegrationTest {
 
         assertThat(schemaExists).isTrue();
         assertThat(successfulMigrations).isEqualTo(1);
+        assertThat(applicationContext.containsBean("discordGateway")).isFalse();
     }
 }
-
