@@ -68,28 +68,31 @@ class GuildConnectionServiceIntegrationTest {
     @Test
     void concurrentConnectionsForANewGuildBothSucceedWithoutCreatingDuplicates() throws Exception {
         ConnectGuildCommand command = new ConnectGuildCommand("concurrent-1002", "Concurrent Guild");
-        CountDownLatch callersReady = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
 
-        try {
-            Future<?> first = executor.submit(() -> connectAfterSignal(command, callersReady, start));
-            Future<?> second = executor.submit(() -> connectAfterSignal(command, callersReady, start));
-            assertThat(callersReady.await(5, TimeUnit.SECONDS)).isTrue();
-
-            start.countDown();
-
-            first.get(10, TimeUnit.SECONDS);
-            second.get(10, TimeUnit.SECONDS);
-        }
-        finally {
-            start.countDown();
-            executor.shutdownNow();
-        }
+        connectConcurrently(command);
 
         assertThat(repository.count()).isEqualTo(1);
         Guild guild = repository.findByDiscordGuildId("concurrent-1002").orElseThrow();
         assertThat(guild.getConnectionStatus()).isEqualTo(GuildConnectionStatus.CONNECTED);
+    }
+
+    @Test
+    void concurrentReconnectsForAnExistingGuildBothSucceedAndPreserveIdentity() throws Exception {
+        String discordGuildId = "concurrent-existing-1002";
+        service.connect(new ConnectGuildCommand(discordGuildId, "Existing Guild"));
+        Guild initiallyConnected = repository.findByDiscordGuildId(discordGuildId).orElseThrow();
+        UUID id = initiallyConnected.getId();
+        Instant firstConnectedAt = initiallyConnected.getFirstConnectedAt();
+        service.disconnect(new DisconnectGuildCommand(discordGuildId));
+
+        connectConcurrently(new ConnectGuildCommand(discordGuildId, "Reconnected Guild"));
+
+        assertThat(repository.count()).isEqualTo(1);
+        Guild reconnected = repository.findByDiscordGuildId(discordGuildId).orElseThrow();
+        assertThat(reconnected.getId()).isEqualTo(id);
+        assertThat(reconnected.getFirstConnectedAt()).isEqualTo(firstConnectedAt);
+        assertThat(reconnected.getConnectionStatus()).isEqualTo(GuildConnectionStatus.CONNECTED);
+        assertThat(reconnected.getDisconnectedAt()).isNull();
     }
 
     @Test
@@ -164,5 +167,26 @@ class GuildConnectionServiceIntegrationTest {
         start.await();
         service.connect(command);
         return null;
+    }
+
+    private void connectConcurrently(ConnectGuildCommand command) throws Exception {
+        CountDownLatch callersReady = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> first = executor.submit(() -> connectAfterSignal(command, callersReady, start));
+            Future<?> second = executor.submit(() -> connectAfterSignal(command, callersReady, start));
+            assertThat(callersReady.await(5, TimeUnit.SECONDS)).isTrue();
+
+            start.countDown();
+
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+        }
+        finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
     }
 }

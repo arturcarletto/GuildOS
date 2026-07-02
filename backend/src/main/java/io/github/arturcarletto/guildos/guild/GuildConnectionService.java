@@ -27,14 +27,14 @@ public class GuildConnectionService {
                 command.guildName(),
                 connectedAt);
 
-        Guild guild = repository.findByDiscordGuildId(command.discordGuildId())
+        Guild guild = repository.findByDiscordGuildIdForUpdate(command.discordGuildId())
                 .orElseThrow(() -> new IllegalStateException("Guild was not available after insert-if-absent"));
         guild.connect(command.guildName(), connectedAt);
     }
 
     @Transactional
     public void disconnect(DisconnectGuildCommand command) {
-        repository.findByDiscordGuildId(command.discordGuildId())
+        repository.findByDiscordGuildIdForUpdate(command.discordGuildId())
                 .ifPresent(guild -> guild.disconnect(clock.instant()));
     }
 }

@@ -4,7 +4,9 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -44,6 +46,10 @@ interface GuildRepository extends JpaRepository<Guild, UUID> {
             @Param("discordGuildId") String discordGuildId,
             @Param("guildName") String guildName,
             @Param("connectedAt") Instant connectedAt);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT guild FROM Guild guild WHERE guild.discordGuildId = :discordGuildId")
+    Optional<Guild> findByDiscordGuildIdForUpdate(@Param("discordGuildId") String discordGuildId);
 
     Optional<Guild> findByDiscordGuildId(String discordGuildId);
 }
