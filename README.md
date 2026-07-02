@@ -1,16 +1,16 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, and a persistent registry of connected guilds.
+Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, and optional Discord OAuth2 login for human operators.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, and a persistent registry of guilds where the bot is installed. The Discord integration is disabled by default. Commands, message and member event collection, authentication, guild onboarding, community analytics, automation, AI features, and a frontend are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, and server-side operator authentication through Discord OAuth2. Bot Gateway and human OAuth integrations are independently disabled by default. Commands, message and member event collection, guild onboarding and authorization, community analytics, automation, AI features, and a frontend are not implemented yet.
 
 ## Technology stack
 
 - Java 21
 - Spring Boot 4.1.0
-- Spring MVC, Spring Data JPA, Jakarta Bean Validation, and Actuator
+- Spring MVC, Spring Security OAuth2 Client, Spring Data JPA, Jakarta Bean Validation, and Actuator
 - PostgreSQL 17
 - Flyway
 - JDA 6.4.2
@@ -112,7 +112,7 @@ Set-Location backend
 
 Startup waits until JDA reports the initial Gateway connection as ready. The integration then synchronizes the guilds currently available to JDA into PostgreSQL. Guild join events create or reconnect registry entries, and guild leave events mark entries disconnected without deleting their history.
 
-The integration uses no optional Gateway intents and does not require Message Content, Guild Members, or Guild Presences. No guild-management API is exposed yet, and authentication and guild onboarding are not implemented.
+The integration uses no optional Gateway intents and does not require Message Content, Guild Members, or Guild Presences. No guild-management API is exposed yet, and guild onboarding and authorization are not implemented. Operator authentication is available separately through Discord OAuth2, described below.
 
 Check the existing Actuator health endpoint from another PowerShell window:
 
@@ -129,6 +129,42 @@ Remove-Item Env:GUILDOS_DISCORD_ENABLED
 Remove-Item Env:DISCORD_BOT_TOKEN
 ```
 
+## Authenticate operators with Discord OAuth2
+
+Human operator login is separate from the JDA bot connection and is disabled by default. In the Discord Developer Portal, add this OAuth2 redirect URI:
+
+```text
+http://localhost:8080/login/oauth2/code/discord
+```
+
+Set the OAuth client credentials only in the PowerShell session that starts Spring Boot:
+
+```powershell
+$env:GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED = "true"
+$env:DISCORD_OAUTH_CLIENT_ID = "your-client-id"
+$env:DISCORD_OAUTH_CLIENT_SECRET = "your-client-secret"
+$env:DISCORD_OAUTH_REDIRECT_URI = "http://localhost:8080/login/oauth2/code/discord"
+```
+
+Never commit or share the client secret. With PostgreSQL running, start the backend with the local profile as described above, then open this explicit login entry point in a browser:
+
+```text
+http://localhost:8080/oauth2/authorization/discord
+```
+
+After Discord authentication, the backend redirects to `GET /api/v1/me`. That protected endpoint returns only the local operator ID and safe Discord profile fields. Discord access and refresh tokens are never stored in Guild OS domain tables, and OAuth tokens and client secrets are never exposed by any API. Authentication does not yet grant access to manage any guild, and guild onboarding and authorization are not implemented.
+
+Spring Security uses a server-side HTTP session. Logout uses `POST /logout` and requires the active CSRF token; successful logout returns HTTP 204. The current in-memory, single-instance session strategy must be revisited before horizontal scaling rather than adding distributed session storage prematurely.
+
+After local testing, remove the OAuth variables from the current PowerShell session:
+
+```powershell
+Remove-Item Env:GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED
+Remove-Item Env:DISCORD_OAUTH_CLIENT_ID
+Remove-Item Env:DISCORD_OAUTH_CLIENT_SECRET
+Remove-Item Env:DISCORD_OAUTH_REDIRECT_URI
+```
+
 ## Run tests and verification
 
 The integration test starts its own PostgreSQL container, runs Flyway, loads the Spring application context, and checks the resulting schema. Docker Desktop must be running.
@@ -143,6 +179,6 @@ CI runs the same Maven `verify` lifecycle on pushes to `main` and pull requests 
 
 ## Configuration model
 
-Shared configuration requires `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`, making non-local runtime configuration explicit. The `local` profile supplies documented local-only defaults. `GUILDOS_DISCORD_ENABLED` defaults to `false`; when set to `true`, `DISCORD_BOT_TOKEN` is required and validated during startup. Hibernate validates the schema but never creates or updates it; Flyway owns all schema changes.
+Shared configuration requires `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`, making non-local runtime configuration explicit. The `local` profile supplies documented local-only defaults. `GUILDOS_DISCORD_ENABLED` and `GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED` default to `false`; their respective bot token or OAuth client credentials are required only when enabled. Hibernate validates the schema but never creates or updates it; Flyway owns all schema changes.
 
 See [the architecture overview](docs/architecture.md) and [ADR 0001](docs/adr/0001-modular-monolith.md) for the initial design decisions.
