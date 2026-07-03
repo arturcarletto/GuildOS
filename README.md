@@ -246,7 +246,7 @@ It requires an authenticated session (it stays under the `/api/**` policy) and r
 }
 ```
 
-Send the returned `token` on each state-changing request using the returned `headerName` (for example `X-CSRF-TOKEN: <token>`), keeping the same session cookie so the server can match it. A browser calls `GET /api/v1/csrf` after login, then includes the header on subsequent `POST`, `DELETE`, and `POST /logout` calls; a successful logout returns `204 No Content`. The token is never exposed through any other endpoint, DTO, or log.
+Send the returned `token` on each state-changing request using the returned `headerName` (for example `X-CSRF-TOKEN: <token>`), keeping the same session cookie so the server can match it. A browser calls `GET /api/v1/csrf` after login, then includes the returned header on subsequent state-changing `POST`, `PUT`, and `DELETE` requests, including `POST /logout`; a successful logout returns `204 No Content`. The token is never exposed through any other endpoint, DTO, or log.
 
 ## Run tests and verification
 

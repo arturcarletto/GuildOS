@@ -265,6 +265,8 @@ class GuildSettingsHttpIntegrationTest {
         assertBadRequest(operator, GUILD_ID, updateJson("UTC", " ", 0));
         assertBadRequest(operator, GUILD_ID, updateJson("z".repeat(65), "en-US", 0));
         assertBadRequest(operator, GUILD_ID, updateJson("UTC", "a".repeat(36), 0));
+        assertBadRequest(operator, GUILD_ID, "{\"locale\":\"en-US\",\"expectedVersion\":0}");
+        assertBadRequest(operator, GUILD_ID, "{\"timezone\":\"UTC\",\"expectedVersion\":0}");
         assertBadRequest(operator, GUILD_ID, "{\"timezone\":\"UTC\",\"locale\":\"en-US\"}");
         assertBadRequest(operator, GUILD_ID, updateJson("UTC", "en-US", -1));
         assertBadRequest(operator, GUILD_ID, "{not-json");
