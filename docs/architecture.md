@@ -4,7 +4,7 @@
 
 Guild OS starts as one deployable Spring Boot application organized by business capability. A modular monolith keeps local development, testing, deployment, and database consistency straightforward while the product boundaries and workload patterns are still being discovered. Package boundaries can provide separation without introducing network calls, distributed transactions, duplicated operational tooling, or premature service ownership.
 
-The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, transactional connection use cases, and a read-only `GuildDirectory` contract that exposes safe registered-guild projections to other capabilities. The `identity` package owns Discord OAuth client configuration, Spring Security policy, local operator accounts, OAuth profile mapping, authenticated principals, and the current-operator API. The `guildaccess` package owns operator-to-guild authorization: the Discord guild client, permission and eligibility evaluation, the persistent operator-to-guild relationship, and the onboarding and guild-access APIs. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
+The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, transactional connection use cases, and a read-only `GuildDirectory` contract that exposes safe registered-guild projections to other capabilities. The `identity` package owns Discord OAuth client configuration, Spring Security policy, local operator accounts, OAuth profile mapping, authenticated principals, and the current-operator API. The `guildaccess` package owns operator-to-guild authorization: the Discord guild client, permission and eligibility evaluation, the persistent operator-to-guild relationship, onboarding and guild-access APIs, and a public `GuildAccessAuthorizer` contract for other capabilities. The `guildsettings` package owns persistent timezone and locale settings plus their authorized HTTP API. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
 
 ## Intended modules
 
@@ -57,7 +57,24 @@ The `guildaccess` package answers "which guilds may this operator manage?". It i
 4. The service confirms the bot is currently connected to the guild through the `GuildDirectory` registry contract.
 5. It creates, reactivates, updates, or revokes the persistent operator-to-guild authorization in PostgreSQL, capturing one clock instant per operation.
 
-The dependency direction is: HTTP controller -> guild-access application service -> operator and guild repositories plus the Discord OAuth guild client -> PostgreSQL. OAuth eligibility (from Discord) and bot presence (from the registry) are independent conditions; onboarding requires both. Discord access and refresh tokens are never persisted in domain tables or exposed by any API; the access token flows only as a transient parameter to the Discord client. Each operator's authorization is isolated: no operator can read or revoke another's. Revocation is soft and idempotent, preserving history and allowing later reactivation. This establishes authorization foundations only; full guild management is not implemented. The authorized-client and session state is single-instance and must be revisited before horizontal scaling.
+The dependency direction is: HTTP controller -> guild-access application service -> operator and guild repositories plus the Discord OAuth guild client -> PostgreSQL. OAuth eligibility (from Discord) and bot presence (from the registry) are independent conditions; onboarding requires both. Discord access and refresh tokens are never persisted in domain tables or exposed by any API; the access token flows only as a transient parameter to the Discord client. Each operator's authorization is isolated: no operator can read or revoke another's. Revocation is soft and idempotent, preserving history and allowing later reactivation. This authorization boundary now supports the `guildsettings` capability; broader guild management remains unimplemented. The authorized-client and session state is single-instance and must be revisited before horizontal scaling.
+
+## Authorized guild settings flow
+
+The `guildsettings` capability owns the first guild-management resource: one persistent timezone and locale configuration per registered guild. It depends on `guildaccess` only through the public `GuildAccessAuthorizer` and `AuthorizedGuildAccess` application contracts. It does not access the guild-access or guild registry entities, repositories, or tables directly, and it never accepts a client-supplied operator id, role, internal guild id, or authorization claim.
+
+The dependency direction is:
+
+`HTTP -> guildsettings application service -> guildaccess authorization contract + guildsettings repository -> PostgreSQL`
+
+1. The controller takes operator identity only from the authenticated principal.
+2. The authorization contract validates the Discord guild id, resolves the registered guild through `GuildDirectory`, and requires a non-revoked authorization for that operator.
+3. On first authorized access, the settings store uses `INSERT ... ON CONFLICT DO NOTHING` to safely materialize `UTC` and `en-US`, including under concurrent requests.
+4. Updates canonicalize the Java `ZoneId` and BCP 47 locale before comparing them with the stored values and require the caller's current `expectedVersion`.
+5. A mutation locks the active operator authorization first and the shared settings row second. Revocation uses the same authorization lock, so an update that follows a revocation lock or commit cannot write. The settings row lock serializes updates by different authorized operators.
+6. A real update flushes before response mapping so the returned JPA version is current. A canonical no-op changes neither version nor `updatedAt`; a stale version returns a conflict without partial mutation.
+
+Each settings transaction captures one clock instant and reuses it for all timestamps it writes. Reads and updates remain available while the bot registry entry is disconnected because active Guild OS authorization, rather than live Gateway state, governs this capability. No Discord HTTP request occurs inside or outside a settings read/update transaction.
 
 ## Initial request and database flow
 

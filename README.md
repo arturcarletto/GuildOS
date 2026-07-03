@@ -1,10 +1,10 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, and guild onboarding that authorizes operators to manage specific guilds.
+Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, and authorized persistent guild settings.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, and operator-to-guild authorization that lets an authenticated operator onboard guilds they are eligible to manage. Bot Gateway and human OAuth integrations are independently disabled by default. This establishes authorization foundations only; commands, message and member event collection, full guild management, community analytics, automation, AI features, and a frontend are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, and persistent per-guild timezone and locale settings. Bot Gateway and human OAuth integrations are independently disabled by default. Commands, message and member event collection, moderation rules, broader guild management, community analytics, automation, AI features, and a frontend are not implemented yet.
 
 ## Technology stack
 
@@ -112,7 +112,7 @@ Set-Location backend
 
 Startup waits until JDA reports the initial Gateway connection as ready. The integration then synchronizes the guilds currently available to JDA into PostgreSQL. Guild join events create or reconnect registry entries, and guild leave events mark entries disconnected without deleting their history.
 
-The integration uses no optional Gateway intents and does not require Message Content, Guild Members, or Guild Presences. No guild-management API is exposed yet, and guild onboarding and authorization are not implemented. Operator authentication is available separately through Discord OAuth2, described below.
+The integration uses no optional Gateway intents and does not require Message Content, Guild Members, or Guild Presences. Guild onboarding, operator authorization, and persistent timezone/locale settings are available through the authenticated APIs described below. Operator authentication is provided separately through Discord OAuth2.
 
 Check the existing Actuator health endpoint from another PowerShell window:
 
@@ -183,11 +183,54 @@ All endpoints require an authenticated session, and state-changing requests requ
 
 An operator can never see or revoke another operator's authorization. API responses expose only safe fields — never permission bitsets, OAuth access or refresh tokens, session identifiers, or client secrets. Discord access and refresh tokens are never persisted in Guild OS domain tables; the access token is read from Spring Security's authorized-client store only for the duration of a request. Error responses are consistent JSON: `401` when unauthenticated or when Discord authorization must be renewed, `403` when the operator lacks Discord eligibility, `404` when the guild is unknown or the bot is disconnected, `400` for an invalid guild id, and `502` or `503` when Discord is unavailable or returns an unusable response.
 
-As with the login session, this authorized-client and session strategy is single-instance and must be revisited before horizontal scaling. This task establishes authorization foundations only; it does not implement full guild management. To try it locally, enable Discord OAuth as above (the `guilds` scope is requested automatically), sign in through `http://localhost:8080/oauth2/authorization/discord`, then call the endpoints above from the authenticated browser session.
+As with the login session, this authorized-client and session strategy is single-instance and must be revisited before horizontal scaling. To try it locally, enable Discord OAuth as above (the `guilds` scope is requested automatically), sign in through `http://localhost:8080/oauth2/authorization/discord`, then call the endpoints above from the authenticated browser session.
+
+## Manage authorized guild settings
+
+An authenticated operator with an active `OWNER` or `ADMIN` Guild OS authorization can manage one shared settings resource for that guild. Authorization comes only from the authenticated server-side principal and the persisted operator-to-guild relationship; requests cannot supply an operator id, role, internal guild id, or Discord permission claim.
+
+Read settings with:
+
+```text
+GET /api/v1/guilds/{discordGuildId}/settings
+```
+
+The first authorized access safely materializes the defaults and returns them:
+
+```json
+{
+  "guildId": "100000000000000123",
+  "name": "Example Guild",
+  "timezone": "UTC",
+  "locale": "en-US",
+  "version": 0,
+  "updatedAt": "2026-07-03T00:00:00Z"
+}
+```
+
+Replace the supported settings with a CSRF-protected request:
+
+```text
+PUT /api/v1/guilds/{discordGuildId}/settings
+```
+
+```json
+{
+  "timezone": "America/Sao_Paulo",
+  "locale": "pt-BR",
+  "expectedVersion": 0
+}
+```
+
+The timezone must be a valid Java/IANA zone id and the locale must be a well-formed BCP 47 language tag. Both are returned in canonical form. A real change increments `version`; a canonical no-op preserves both the version and `updatedAt`. A stale `expectedVersion` returns HTTP `409` with `{"error":"conflict"}` and changes nothing.
+
+`GET` needs no CSRF token. `PUT` requires the token from `GET /api/v1/csrf` and returns `403` with `{"error":"forbidden"}` when it is missing. Unknown guilds, missing access, and revoked access all return the same JSON `404`. Settings remain readable and writable while the bot is temporarily disconnected as long as the operator's persisted authorization remains active. Two authorized operators for the same guild see the same settings resource.
+
+The settings API does not call Discord and never exposes internal persistence ids, operator ids, OAuth tokens, permission bitsets, session identifiers, or client secrets. It does not implement commands, moderation or welcome-message execution, additional guild policy fields, or a frontend.
 
 ### CSRF tokens for API clients
 
-CSRF protection stays enabled, so every state-changing request — `POST /api/v1/onboarding/guilds/{discordGuildId}`, `DELETE /api/v1/guilds/{discordGuildId}/access`, and `POST /logout` — must carry a valid CSRF token. An authenticated client obtains the current token from a dedicated endpoint:
+CSRF protection stays enabled, so every state-changing request — `POST /api/v1/onboarding/guilds/{discordGuildId}`, `DELETE /api/v1/guilds/{discordGuildId}/access`, `PUT /api/v1/guilds/{discordGuildId}/settings`, and `POST /logout` — must carry a valid CSRF token. An authenticated client obtains the current token from a dedicated endpoint:
 
 ```text
 GET /api/v1/csrf
