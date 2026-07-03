@@ -11,11 +11,11 @@ import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 final class DiscordCommandCatalog {
 
     List<CommandData> commands() {
-        CommandData guildOs = Commands.slash("guildos", "Guild OS commands")
-                .setDefaultPermissions(DefaultMemberPermissions.ENABLED)
-                .addSubcommands(new SubcommandData(
+        CommandData guildOs = Commands.slash(
                         "status",
-                        "Show Guild OS status for this server"));
+                        "Show Guild OS status for this server"
+                    )
+                    .setDefaultPermissions(DefaultMemberPermissions.ENABLED);
         return List.of(guildOs);
     }
 }
