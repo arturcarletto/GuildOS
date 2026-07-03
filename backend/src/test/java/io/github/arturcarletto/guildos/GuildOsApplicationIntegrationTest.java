@@ -75,9 +75,36 @@ class GuildOsApplicationIntegrationTest {
                         )
                         """,
                 Boolean.class);
+        Boolean operatorGuildAccessTableExists = jdbcTemplate.queryForObject(
+                """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = 'guild_os' AND table_name = 'operator_guild_access'
+                        )
+                        """,
+                Boolean.class);
+        Boolean guildSettingsTableExists = jdbcTemplate.queryForObject(
+                """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = 'guild_os' AND table_name = 'guild_settings'
+                        )
+                        """,
+                Boolean.class);
         Integer successfulMigrations = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM guild_os.flyway_schema_history WHERE version IN ('1', '2', '3') AND success",
+                "SELECT COUNT(*) FROM guild_os.flyway_schema_history "
+                        + "WHERE version IN ('1', '2', '3', '4', '5') AND success",
                 Integer.class);
+        String guildSettingsDeleteRule = jdbcTemplate.queryForObject(
+                """
+                        SELECT delete_rule
+                        FROM information_schema.referential_constraints
+                        WHERE constraint_schema = 'guild_os'
+                          AND constraint_name = 'guild_settings_registered_guild_fk'
+                        """,
+                String.class);
         String disconnectedAtType = jdbcTemplate.queryForObject(
                 """
                         SELECT data_type
@@ -91,7 +118,10 @@ class GuildOsApplicationIntegrationTest {
         assertThat(schemaExists).isTrue();
         assertThat(guildsTableExists).isTrue();
         assertThat(operatorAccountsTableExists).isTrue();
-        assertThat(successfulMigrations).isEqualTo(3);
+        assertThat(operatorGuildAccessTableExists).isTrue();
+        assertThat(guildSettingsTableExists).isTrue();
+        assertThat(successfulMigrations).isEqualTo(5);
+        assertThat(guildSettingsDeleteRule).isEqualTo("NO ACTION");
         assertThat(disconnectedAtType).isEqualTo("timestamp with time zone");
         assertThat(applicationContext.containsBean("discordGateway")).isFalse();
         assertThat(applicationContext.getBeansOfType(ClientRegistrationRepository.class)).isEmpty();

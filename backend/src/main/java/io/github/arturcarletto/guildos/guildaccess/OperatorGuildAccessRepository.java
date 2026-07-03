@@ -57,6 +57,14 @@ interface OperatorGuildAccessRepository extends JpaRepository<OperatorGuildAcces
 
     @Query("""
             SELECT access FROM OperatorGuildAccess access
+            WHERE access.operatorId = :operatorId AND access.registeredGuildId = :registeredGuildId
+            """)
+    Optional<OperatorGuildAccess> findByOperatorIdAndRegisteredGuildId(
+            @Param("operatorId") UUID operatorId,
+            @Param("registeredGuildId") UUID registeredGuildId);
+
+    @Query("""
+            SELECT access FROM OperatorGuildAccess access
             WHERE access.operatorId = :operatorId AND access.revokedAt IS NULL
             """)
     List<OperatorGuildAccess> findActiveByOperatorId(@Param("operatorId") UUID operatorId);
