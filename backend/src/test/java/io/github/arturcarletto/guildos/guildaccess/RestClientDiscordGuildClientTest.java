@@ -57,10 +57,10 @@ class RestClientDiscordGuildClientTest {
     }
 
     @Test
-    void treatsMissingOwnerAndIconAsAbsent() {
+    void treatsNullIconAsAbsentWhenOwnerIsPresent() {
         server.expect(requestTo(RestClientDiscordGuildClient.USER_GUILDS_URI))
                 .andRespond(withSuccess(
-                        "[{\"id\":\"100\",\"name\":\"Guild\",\"icon\":null,\"permissions\":\"0\"}]",
+                        "[{\"id\":\"100\",\"name\":\"Guild\",\"icon\":null,\"owner\":false,\"permissions\":\"0\"}]",
                         MediaType.APPLICATION_JSON));
 
         OperatorDiscordGuild guild = client.fetchOperatorGuilds(TOKEN).get(0);
@@ -151,10 +151,54 @@ class RestClientDiscordGuildClientTest {
     void malformedPermissionsIsABadGatewayResponse() {
         server.expect(requestTo(RestClientDiscordGuildClient.USER_GUILDS_URI))
                 .andRespond(withSuccess(
-                        "[{\"id\":\"1\",\"name\":\"Guild\",\"permissions\":\"not-a-number\"}]",
+                        "[{\"id\":\"1\",\"name\":\"Guild\",\"owner\":false,\"permissions\":\"not-a-number\"}]",
                         MediaType.APPLICATION_JSON));
 
         assertThatThrownBy(() -> client.fetchOperatorGuilds(TOKEN))
                 .isInstanceOf(DiscordResponseException.class);
+    }
+
+    @Test
+    void nullGuildEntryIsABadGatewayResponseWithoutLeakingToken() {
+        server.expect(requestTo(RestClientDiscordGuildClient.USER_GUILDS_URI))
+                .andRespond(withSuccess("[null]", MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.fetchOperatorGuilds(TOKEN))
+                .isInstanceOf(DiscordResponseException.class)
+                .hasMessageNotContaining(TOKEN);
+    }
+
+    @Test
+    void missingOwnerIsABadGatewayResponseWithoutLeakingToken() {
+        server.expect(requestTo(RestClientDiscordGuildClient.USER_GUILDS_URI))
+                .andRespond(withSuccess(
+                        "[{\"id\":\"100\",\"name\":\"Guild\",\"permissions\":\"0\"}]",
+                        MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.fetchOperatorGuilds(TOKEN))
+                .isInstanceOf(DiscordResponseException.class)
+                .hasMessageNotContaining(TOKEN);
+    }
+
+    @Test
+    void invalidSnowflakeGuildIdIsABadGatewayResponseWithoutLeakingToken() {
+        server.expect(requestTo(RestClientDiscordGuildClient.USER_GUILDS_URI))
+                .andRespond(withSuccess(
+                        "[{\"id\":\"not-a-snowflake\",\"name\":\"Guild\",\"owner\":true,\"permissions\":\"0\"}]",
+                        MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.fetchOperatorGuilds(TOKEN))
+                .isInstanceOf(DiscordResponseException.class)
+                .hasMessageNotContaining(TOKEN);
+    }
+
+    @Test
+    void redirectResponseIsABadGatewayResponseWithoutLeakingToken() {
+        server.expect(requestTo(RestClientDiscordGuildClient.USER_GUILDS_URI))
+                .andRespond(withStatus(HttpStatus.FOUND));
+
+        assertThatThrownBy(() -> client.fetchOperatorGuilds(TOKEN))
+                .isInstanceOf(DiscordResponseException.class)
+                .hasMessageNotContaining(TOKEN);
     }
 }

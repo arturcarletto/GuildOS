@@ -185,6 +185,26 @@ An operator can never see or revoke another operator's authorization. API respon
 
 As with the login session, this authorized-client and session strategy is single-instance and must be revisited before horizontal scaling. This task establishes authorization foundations only; it does not implement full guild management. To try it locally, enable Discord OAuth as above (the `guilds` scope is requested automatically), sign in through `http://localhost:8080/oauth2/authorization/discord`, then call the endpoints above from the authenticated browser session.
 
+### CSRF tokens for API clients
+
+CSRF protection stays enabled, so every state-changing request — `POST /api/v1/onboarding/guilds/{discordGuildId}`, `DELETE /api/v1/guilds/{discordGuildId}/access`, and `POST /logout` — must carry a valid CSRF token. An authenticated client obtains the current token from a dedicated endpoint:
+
+```text
+GET /api/v1/csrf
+```
+
+It requires an authenticated session (it stays under the `/api/**` policy) and returns only the values needed to send the token back:
+
+```json
+{
+  "headerName": "X-CSRF-TOKEN",
+  "parameterName": "_csrf",
+  "token": "<opaque-token>"
+}
+```
+
+Send the returned `token` on each state-changing request using the returned `headerName` (for example `X-CSRF-TOKEN: <token>`), keeping the same session cookie so the server can match it. A browser calls `GET /api/v1/csrf` after login, then includes the header on subsequent `POST`, `DELETE`, and `POST /logout` calls; a successful logout returns `204 No Content`. The token is never exposed through any other endpoint, DTO, or log.
+
 ## Run tests and verification
 
 The integration test starts its own PostgreSQL container, runs Flyway, loads the Spring application context, and checks the resulting schema. Docker Desktop must be running.

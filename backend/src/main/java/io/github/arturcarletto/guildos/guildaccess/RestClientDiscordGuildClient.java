@@ -37,7 +37,7 @@ class RestClientDiscordGuildClient implements DiscordGuildClient {
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                     .accept(MediaType.APPLICATION_JSON)
                     .retrieve()
-                    .onStatus(HttpStatusCode::isError, (request, response) -> {
+                    .onStatus(status -> !status.is2xxSuccessful(), (request, response) -> {
                         throw mapErrorStatus(response.getStatusCode());
                     })
                     .body(DiscordGuildResponse[].class);
@@ -67,20 +67,35 @@ class RestClientDiscordGuildClient implements DiscordGuildClient {
         if (status.value() == HttpStatus.TOO_MANY_REQUESTS.value() || status.is5xxServerError()) {
             return new DiscordUnavailableException("Discord is temporarily unavailable");
         }
-        return new DiscordResponseException("Discord returned an unexpected error status");
+        return new DiscordResponseException("Discord returned an unexpected response status");
     }
 
     private static OperatorDiscordGuild toOperatorGuild(DiscordGuildResponse response) {
-        if (!StringUtils.hasText(response.id())) {
-            throw new DiscordResponseException("Discord guild is missing its id");
+        if (response == null) {
+            throw new DiscordResponseException("Discord returned a null guild entry");
         }
+        String discordGuildId = requireValidId(response.id());
         if (!StringUtils.hasText(response.name())) {
             throw new DiscordResponseException("Discord guild is missing its name");
         }
+        if (response.owner() == null) {
+            throw new DiscordResponseException("Discord guild is missing its owner flag");
+        }
         BigInteger permissions = parsePermissions(response.permissions());
-        boolean owner = Boolean.TRUE.equals(response.owner());
         String iconHash = StringUtils.hasText(response.icon()) ? response.icon() : null;
-        return new OperatorDiscordGuild(response.id(), response.name(), iconHash, owner, permissions);
+        return new OperatorDiscordGuild(discordGuildId, response.name(), iconHash, response.owner(), permissions);
+    }
+
+    private static String requireValidId(String id) {
+        if (!StringUtils.hasText(id)) {
+            throw new DiscordResponseException("Discord guild is missing its id");
+        }
+        try {
+            return DiscordSnowflakes.requireValid(id);
+        }
+        catch (InvalidDiscordGuildIdException exception) {
+            throw new DiscordResponseException("Discord guild id was not a valid snowflake");
+        }
     }
 
     private static BigInteger parsePermissions(String raw) {

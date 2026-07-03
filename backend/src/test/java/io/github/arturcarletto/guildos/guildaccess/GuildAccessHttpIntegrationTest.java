@@ -4,11 +4,14 @@ import java.math.BigInteger;
 import java.time.Instant;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
@@ -18,6 +21,7 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -75,6 +79,8 @@ class GuildAccessHttpIntegrationTest {
 
     @Autowired
     private MutableTestClock clock;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @MockitoBean
     private DiscordGuildClient discordGuildClient;
@@ -245,6 +251,34 @@ class GuildAccessHttpIntegrationTest {
                         .with(oauth2Login().oauth2User(operator)))
                 .andExpect(status().isForbidden())
                 .andExpect(content().json("{\"error\":\"forbidden\"}"));
+    }
+
+    @Test
+    void operatorRetrievesCsrfTokenAndUsesItToOnboard() throws Exception {
+        AuthenticatedOperator operator = operatorPrincipal("csrf-flow");
+        connectGuild(GUILD_ID);
+        stubOwnerGuild(GUILD_ID);
+        seedAuthorizedClient(operator);
+
+        MvcResult csrfResult = mockMvc.perform(get("/api/v1/csrf").with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andExpect(jsonPath("$.headerName").isNotEmpty())
+                .andReturn();
+
+        MockHttpSession session = (MockHttpSession) csrfResult.getRequest().getSession();
+        JsonNode body = objectMapper.readTree(csrfResult.getResponse().getContentAsString());
+        String headerName = body.get("headerName").asText();
+        String token = body.get("token").asText();
+
+        // Deliberately no .with(csrf()) — the real token from GET /api/v1/csrf must authorize the POST.
+        mockMvc.perform(post("/api/v1/onboarding/guilds/{id}", GUILD_ID)
+                        .with(oauth2Login().oauth2User(operator))
+                        .session(session)
+                        .header(headerName, token))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.guildId").value(GUILD_ID))
+                .andExpect(jsonPath("$.role").value("OWNER"));
     }
 
     @Test
