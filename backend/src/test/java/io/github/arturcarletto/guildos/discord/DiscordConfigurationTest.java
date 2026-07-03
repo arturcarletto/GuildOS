@@ -5,6 +5,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
+import io.github.arturcarletto.guildos.guildwelcome.GuildWelcomeService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -14,7 +15,8 @@ class DiscordConfigurationTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withUserConfiguration(DiscordConfiguration.class)
             .withBean(GuildConnectionService.class, () -> mock(GuildConnectionService.class))
-            .withBean(GuildStatusService.class, () -> mock(GuildStatusService.class));
+            .withBean(GuildStatusService.class, () -> mock(GuildStatusService.class))
+            .withBean(GuildWelcomeService.class, () -> mock(GuildWelcomeService.class));
 
     @Test
     void disabledIntegrationDoesNotRequireATokenOrCreateGatewayBeans() {
@@ -27,6 +29,7 @@ class DiscordConfigurationTest {
                     assertThat(context).doesNotHaveBean(DiscordHealthIndicator.class);
                     assertThat(context).doesNotHaveBean(DiscordGuildEventListener.class);
                     assertThat(context).doesNotHaveBean(DiscordSlashCommandListener.class);
+                    assertThat(context).doesNotHaveBean(DiscordWelcomeCommandListener.class);
                     assertThat(context).doesNotHaveBean(DiscordGuildCommandRegistrar.class);
                     assertThat(context).doesNotHaveBean(DiscordCommandCatalog.class);
                 });

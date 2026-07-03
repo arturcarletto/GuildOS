@@ -123,10 +123,9 @@ class DiscordSlashCommandListenerTest {
     }
 
     @Test
-    void missingOrDifferentSubcommandDoesNotTriggerStatus() {
+    void legacyGuildosRootDoesNotTriggerStatus() {
         SlashCommandInteractionEvent event = mock(SlashCommandInteractionEvent.class);
         when(event.getName()).thenReturn("guildos");
-        when(event.getSubcommandName()).thenReturn("other");
 
         listener.onSlashCommandInteraction(event);
 
@@ -137,8 +136,7 @@ class DiscordSlashCommandListenerTest {
     @Test
     void directMessageDoesNotTriggerStatus() {
         SlashCommandInteractionEvent event = mock(SlashCommandInteractionEvent.class);
-        when(event.getName()).thenReturn("guildos");
-        when(event.getSubcommandName()).thenReturn("status");
+        when(event.getName()).thenReturn("status");
         when(event.isFromGuild()).thenReturn(false);
 
         listener.onSlashCommandInteraction(event);
@@ -155,8 +153,7 @@ class DiscordSlashCommandListenerTest {
         InteractionHook hook = mock(InteractionHook.class);
         WebhookMessageEditAction<Message> editAction = mock(WebhookMessageEditAction.class);
 
-        when(event.getName()).thenReturn("guildos");
-        when(event.getSubcommandName()).thenReturn("status");
+        when(event.getName()).thenReturn("status");
         when(event.isFromGuild()).thenReturn(true);
         when(event.getGuild()).thenReturn(guild);
         when(guild.getId()).thenReturn(GUILD_ID);

@@ -4,7 +4,7 @@
 
 Guild OS starts as one deployable Spring Boot application organized by business capability. A modular monolith keeps local development, testing, deployment, and database consistency straightforward while the product boundaries and workload patterns are still being discovered. Package boundaries can provide separation without introducing network calls, distributed transactions, duplicated operational tooling, or premature service ownership.
 
-The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, guild command registration and interaction replies, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, transactional connection use cases, and a read-only `GuildDirectory` contract that exposes safe registered-guild projections to other capabilities. The `identity` package owns Discord OAuth client configuration, Spring Security policy, local operator accounts, OAuth profile mapping, authenticated principals, and the current-operator API. The `guildaccess` package owns operator-to-guild authorization: the Discord guild client, permission and eligibility evaluation, the persistent operator-to-guild relationship, onboarding and guild-access APIs, and public authorization/onboarding read contracts for other capabilities. The `guildsettings` package owns persistent timezone and locale settings plus authorized and read-only application contracts. The `guildstatus` package owns the platform-neutral, read-only guild status use case. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
+The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, guild command registration and interaction replies, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, transactional connection use cases, and a read-only `GuildDirectory` contract that exposes safe registered-guild projections to other capabilities. The `identity` package owns Discord OAuth client configuration, Spring Security policy, local operator accounts, OAuth profile mapping, authenticated principals, and the current-operator API. The `guildaccess` package owns operator-to-guild authorization: the Discord guild client, permission and eligibility evaluation, the persistent operator-to-guild relationship, onboarding and guild-access APIs, and public authorization/onboarding read contracts for other capabilities. The `guildsettings` package owns persistent timezone and locale settings plus authorized and read-only application contracts. The `guildstatus` package owns the platform-neutral, read-only guild status use case. The `guildwelcome` package owns persistent welcome configuration, deterministic template validation/rendering, and platform-neutral administration and preview use cases. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
 
 ## Intended modules
 
@@ -38,9 +38,9 @@ The lifecycle listener handles guild ready, join, and leave signals and delegate
 
 ## Discord slash command flow
 
-The Discord adapter owns one authoritative command catalog for this application. It currently contains the guild-only `/guildos status` command. On a ready or guild-join event, the lifecycle listener first synchronizes the guild registry and then asks the command registrar to bulk-update the complete catalog through Discord's guild command API:
+The Discord adapter owns one authoritative command catalog for this application. It contains the guild-only `/status` command and `/welcome` with its `status`, `configure`, `preview`, and `disable` subcommands. On a ready or guild-join event, the lifecycle listener first synchronizes the guild registry and then asks the command registrar to bulk-update the complete catalog through Discord's guild command API:
 
-`Ready/join event -> guild registry synchronization -> command registrar -> Discord guild command API`
+`Ready/join event -> guild registry synchronization -> authoritative command catalog -> guild bulk command update`
 
 The bulk update is application-scoped by Discord and replaces this application's command list for that guild; it does not affect another Discord application's commands. Keeping one catalog and one registrar prevents independent listeners from overwriting each other's definitions. Registration is asynchronous, idempotent, and outside database transactions. A registration failure is safely logged by guild id and failure category and cannot undo successful guild persistence or fail application startup.
 
@@ -48,9 +48,27 @@ The interaction dependency direction is:
 
 `Slash interaction -> Discord adapter -> guild status service -> public guild/onboarding/settings read contracts -> PostgreSQL -> ephemeral Discord reply`
 
-The listener accepts only the guild-scoped `guildos`/`status` combination, defers an ephemeral reply before database-backed work, and ignores unrelated or direct-message interactions. The platform-neutral `guildstatus` service resolves connection state through `GuildDirectory`, onboarding state through `GuildOnboardingDirectory`, and existing settings through `GuildSettingsReader`. Missing persisted settings use in-memory `UTC`/`en-US`/version `0` defaults. Unknown or disconnected registry entries produce an unavailable result, while connected guilds with no active onboarding authorization receive a non-sensitive onboarding-required result.
+The listener accepts only the guild-scoped `status` root command, defers an ephemeral reply before database-backed work, and ignores unrelated or direct-message interactions. The platform-neutral `guildstatus` service resolves connection state through `GuildDirectory`, onboarding state through `GuildOnboardingDirectory`, and existing settings through `GuildSettingsReader`. Missing persisted settings use in-memory `UTC`/`en-US`/version `0` defaults. Unknown or disconnected registry entries produce an unavailable result, while connected guilds with no active onboarding authorization receive a non-sensitive onboarding-required result.
 
-JDA command, guild, interaction, and reply types remain entirely inside the `discord` adapter. The status service and its read contracts contain no JDA types. The `/guildos status` path performs no database writes, does not materialize settings, and makes no Discord REST call while a database transaction is open. Command registration and interaction replies also occur outside database transactions. No new Gateway intents are enabled.
+JDA command, guild, interaction, and reply types remain entirely inside the `discord` adapter. The status service and its read contracts contain no JDA types. The `/status` path performs no database writes, does not materialize settings, and makes no Discord REST call while a database transaction is open. Command registration and interaction replies also occur outside database transactions. No new Gateway intents are enabled.
+
+## Welcome configuration and preview flow
+
+The dedicated welcome interaction listener handles only the `welcome` root command. Discord's default command permission is Manage Server for discoverability, while the listener independently rechecks the invoking member's effective live Manage Server permission. The guild must also be connected according to `GuildDirectory` and onboarded according to `GuildOnboardingDirectory`; the welcome capability never queries another capability's table or fabricates an operator identity.
+
+Configure follows this dependency direction:
+
+`Discord interaction -> ephemeral defer -> runtime member/channel permission checks -> platform-neutral welcome service -> guild/onboarding contracts -> transactional welcome store -> PostgreSQL -> ephemeral Discord reply`
+
+The Discord adapter validates that the option is a standard text or announcement channel in the invoking guild and that the bot can view and send to it. These JDA operations occur before the short database transaction. The service normalizes and validates the template, then the store uses PostgreSQL `INSERT ... ON CONFLICT DO NOTHING` for safe first materialization, loads the managed row, applies the desired state, and flushes real changes before mapping the version. An enabled identical configuration is a no-op. Existing-row changes use JPA `@Version`; a stale mutation rolls back and becomes a controlled retry response rather than silently overwriting another administrator's change. Disable preserves the channel and template, and an already-disabled configuration is also a no-op.
+
+Status and preview follow read-only paths and never materialize a configuration row:
+
+`Discord interaction -> ephemeral defer -> welcome service read -> deterministic template renderer -> ephemeral preview`
+
+The renderer supports only `{member}`, `{server}`, and `{memberCount}`, bounds output, normalizes line endings, and prevents recursive replacement. Templates reject mass mentions and raw Discord mention syntax. Every administrative edit disables allowed mentions. Status and preview resolve the stored channel from JDA only after the database read; a deleted or inaccessible channel produces a warning without mutating persistence. Preview may render an enabled or disabled configuration but never calls a channel `sendMessage` path.
+
+All JDA types remain in `discord`; `guildwelcome` contains no JDA dependency. Configure and disable transactions contain no Discord calls, and status/preview are read-only. The command catalog remains the sole registration owner and uses the existing guild bulk update—there is no global registration. No additional Gateway intent or bot Administrator permission is introduced. Real member-join handling and welcome delivery are explicitly deferred to GUILD-009.
 
 ## Operator authentication flow
 
