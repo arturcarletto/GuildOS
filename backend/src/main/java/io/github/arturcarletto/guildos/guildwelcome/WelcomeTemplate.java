@@ -14,8 +14,7 @@ record WelcomeTemplate(String value) {
             Pattern.compile("<(?:@!?|@&|#)[0-9]{1,20}>");
     private static final Set<String> ALLOWED_PLACEHOLDERS =
             Set.of("{member}", "{server}", "{memberCount}");
-    private static final WelcomePreviewContext MAXIMUM_CONTEXT =
-            new WelcomePreviewContext("M".repeat(32), "S".repeat(100), Integer.MAX_VALUE);
+    private static final WelcomePreviewContext MAXIMUM_CONTEXT = WelcomePreviewContext.maximum();
 
     static WelcomeTemplate parse(String rawTemplate) {
         if (rawTemplate == null) {

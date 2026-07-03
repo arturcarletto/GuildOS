@@ -44,6 +44,7 @@ final class DiscordWelcomeCommandListener extends ListenerAdapter {
     private static final String FAILURE_MESSAGE =
             "Guild OS could not manage welcome messages right now. Please try again later.";
     private static final int DISCORD_MESSAGE_LIMIT = 2000;
+    private static final String TEMPLATE_TRUNCATION_MARKER = "... (template truncated)";
 
     private final GuildWelcomeService welcomeService;
 
@@ -183,24 +184,66 @@ final class DiscordWelcomeCommandListener extends ListenerAdapter {
             case UNAVAILABLE -> UNAVAILABLE_MESSAGE;
             case ONBOARDING_REQUIRED -> ONBOARDING_MESSAGE;
             case NOT_CONFIGURED -> NOT_CONFIGURED_MESSAGE;
-            case CONFIGURED -> {
-                ResolvedChannel channel = resolveStoredChannel(guild, status.channelId());
-                yield """
-                        Welcome configuration
-                        Server: %s
-                        Status: %s
-                        Channel: %s%s
-                        Template: %s
-                        Version: %d
-                        """.formatted(
-                                MarkdownSanitizer.escape(status.guildName()),
-                                status.enabled() ? "Enabled" : "Disabled",
-                                channel.displayName(),
-                                channel.warning(),
-                                MarkdownSanitizer.escape(status.messageTemplate()),
-                                status.version()).stripTrailing();
-            }
+            case CONFIGURED -> renderConfiguredStatus(status, guild);
         };
+    }
+
+    /**
+     * Formats a configured `/welcome status` response so that only the displayed template is ever
+     * truncated. The heading, server, status, channel, and version metadata always survive; the
+     * escaped template is fitted into whatever Discord message budget remains after the fixed
+     * prefix and suffix. This deliberately does not rely on the generic whole-message bound, which
+     * would blindly cut structural metadata off the end of a Markdown-heavy template.
+     */
+    private String renderConfiguredStatus(GuildWelcomeView status, Guild guild) {
+        ResolvedChannel channel = resolveStoredChannel(guild, status.channelId());
+        String prefix = """
+                Welcome configuration
+                Server: %s
+                Status: %s
+                Channel: %s%s
+                Template:\s""".formatted(
+                        MarkdownSanitizer.escape(status.guildName()),
+                        status.enabled() ? "Enabled" : "Disabled",
+                        channel.displayName(),
+                        channel.warning());
+        String suffix = "\nVersion: %d".formatted(status.version());
+        String escapedTemplate = MarkdownSanitizer.escape(status.messageTemplate());
+        int budget = DISCORD_MESSAGE_LIMIT - prefix.length() - suffix.length();
+        String templateSection = escapedTemplate.length() <= budget
+                ? escapedTemplate
+                : truncateTemplateForDisplay(escapedTemplate, budget);
+        return prefix + templateSection + suffix;
+    }
+
+    /**
+     * Truncates an escaped template to fit {@code budget} characters including the explicit
+     * truncation marker. Deterministic, never throws for a small budget, never splits a UTF-16
+     * surrogate pair, and avoids ending on a dangling Markdown escape backslash when practical.
+     */
+    private static String truncateTemplateForDisplay(String escapedTemplate, int budget) {
+        int available = budget - TEMPLATE_TRUNCATION_MARKER.length();
+        if (available <= 0) {
+            // Not even the marker fits; keep as much of it as the budget allows.
+            return TEMPLATE_TRUNCATION_MARKER.substring(0, Math.max(0, budget));
+        }
+        int end = available;
+        if (Character.isHighSurrogate(escapedTemplate.charAt(end - 1))) {
+            end--;
+        }
+        end = trimDanglingEscape(escapedTemplate, end);
+        return escapedTemplate.substring(0, end) + TEMPLATE_TRUNCATION_MARKER;
+    }
+
+    private static int trimDanglingEscape(String value, int end) {
+        int backslashes = 0;
+        int index = end - 1;
+        while (index >= 0 && value.charAt(index) == '\\') {
+            backslashes++;
+            index--;
+        }
+        // An odd run of trailing backslashes leaves a dangling escape; drop the last one.
+        return backslashes % 2 == 1 ? end - 1 : end;
     }
 
     private String renderDisable(GuildWelcomeView disabled) {

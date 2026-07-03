@@ -13,6 +13,7 @@ import io.github.arturcarletto.guildos.guildaccess.GuildOnboardingDirectory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -72,15 +73,17 @@ class GuildWelcomeServiceTest {
                         new WelcomePreviewContext("Artur", "Heaven", 42))
                 .state()).isEqualTo(GuildWelcomeState.NOT_CONFIGURED);
 
-        verify(store, never()).configure(any(), anyString(), anyString());
-        verify(store, never()).disable(any());
+        verify(store, never()).createIfAbsent(any(), anyString(), anyString());
+        verify(store, never()).configureExisting(any(), anyString(), anyString(), anyLong());
+        verify(store, never()).disableExisting(any(), anyLong());
     }
 
     @Test
-    void configureNormalizesAndReturnsSafePersistedState() {
+    void configureFromAbsentSnapshotCreatesAndReturnsSafePersistedState() {
         allowAccess();
-        when(store.configure(REGISTERED_GUILD_ID, "8001", "Welcome {member}"))
-                .thenReturn(new StoredGuildWelcome(true, "8001", "Welcome {member}", 2));
+        when(store.find(REGISTERED_GUILD_ID)).thenReturn(Optional.empty());
+        when(store.createIfAbsent(REGISTERED_GUILD_ID, "8001", "Welcome {member}"))
+                .thenReturn(new StoredGuildWelcome(true, "8001", "Welcome {member}", 0));
 
         GuildWelcomeView result =
                 service.configure(DISCORD_GUILD_ID, "8001", " \r\nWelcome {member}\r\n ");
@@ -89,10 +92,39 @@ class GuildWelcomeServiceTest {
         assertThat(result.enabled()).isTrue();
         assertThat(result.channelId()).isEqualTo("8001");
         assertThat(result.messageTemplate()).isEqualTo("Welcome {member}");
-        assertThat(result.version()).isEqualTo(2);
+        assertThat(result.version()).isZero();
         assertThat(result.getClass().getRecordComponents())
                 .extracting(component -> component.getName())
                 .doesNotContain("id", "registeredGuildId", "operatorId");
+        verify(store, never()).configureExisting(any(), anyString(), anyString(), anyLong());
+    }
+
+    @Test
+    void configureFromPresentSnapshotUpdatesAgainstTheObservedVersion() {
+        allowAccess();
+        when(store.find(REGISTERED_GUILD_ID))
+                .thenReturn(Optional.of(new StoredGuildWelcome(true, "8000", "Old", 4)));
+        when(store.configureExisting(REGISTERED_GUILD_ID, "8001", "Welcome {member}", 4))
+                .thenReturn(new StoredGuildWelcome(true, "8001", "Welcome {member}", 5));
+
+        GuildWelcomeView result =
+                service.configure(DISCORD_GUILD_ID, "8001", "Welcome {member}");
+
+        assertThat(result.version()).isEqualTo(5);
+        assertThat(result.channelId()).isEqualTo("8001");
+        verify(store).configureExisting(REGISTERED_GUILD_ID, "8001", "Welcome {member}", 4);
+        verify(store, never()).createIfAbsent(any(), anyString(), anyString());
+    }
+
+    @Test
+    void configureLostCreateRaceBecomesAControlledConflict() {
+        allowAccess();
+        when(store.find(REGISTERED_GUILD_ID)).thenReturn(Optional.empty());
+        when(store.createIfAbsent(REGISTERED_GUILD_ID, "8001", "Welcome"))
+                .thenThrow(new GuildWelcomeConflictException());
+
+        assertThatThrownBy(() -> service.configure(DISCORD_GUILD_ID, "8001", "Welcome"))
+                .isInstanceOf(GuildWelcomeConflictException.class);
     }
 
     @Test
@@ -103,7 +135,9 @@ class GuildWelcomeServiceTest {
                         DISCORD_GUILD_ID, "8001", "Hello @everyone"))
                 .isInstanceOf(InvalidWelcomeTemplateException.class);
 
-        verify(store, never()).configure(any(), anyString(), anyString());
+        verify(store, never()).find(any());
+        verify(store, never()).createIfAbsent(any(), anyString(), anyString());
+        verify(store, never()).configureExisting(any(), anyString(), anyString(), anyLong());
     }
 
     @Test
@@ -118,24 +152,42 @@ class GuildWelcomeServiceTest {
 
         assertThat(result.enabled()).isFalse();
         assertThat(result.renderedPreview()).isEqualTo("Hi Artur at Heaven #42");
-        verify(store, never()).configure(any(), anyString(), anyString());
-        verify(store, never()).disable(any());
+        verify(store, never()).createIfAbsent(any(), anyString(), anyString());
+        verify(store, never()).configureExisting(any(), anyString(), anyString(), anyLong());
+        verify(store, never()).disableExisting(any(), anyLong());
     }
 
     @Test
     void disableReturnsNotConfiguredWithoutMaterializingARow() {
         allowAccess();
-        when(store.disable(REGISTERED_GUILD_ID)).thenReturn(Optional.empty());
+        when(store.find(REGISTERED_GUILD_ID)).thenReturn(Optional.empty());
 
         assertThat(service.disable(DISCORD_GUILD_ID).state())
                 .isEqualTo(GuildWelcomeState.NOT_CONFIGURED);
-        verify(store, never()).configure(any(), anyString(), anyString());
+        verify(store, never()).disableExisting(any(), anyLong());
+    }
+
+    @Test
+    void disableFromPresentSnapshotDisablesAgainstTheObservedVersion() {
+        allowAccess();
+        when(store.find(REGISTERED_GUILD_ID))
+                .thenReturn(Optional.of(new StoredGuildWelcome(true, "8001", "Welcome", 6)));
+        when(store.disableExisting(REGISTERED_GUILD_ID, 6))
+                .thenReturn(new StoredGuildWelcome(false, "8001", "Welcome", 7));
+
+        GuildWelcomeView result = service.disable(DISCORD_GUILD_ID);
+
+        assertThat(result.enabled()).isFalse();
+        assertThat(result.version()).isEqualTo(7);
+        verify(store).disableExisting(REGISTERED_GUILD_ID, 6);
     }
 
     @Test
     void optimisticPersistenceFailureBecomesAControlledWelcomeConflict() {
         allowAccess();
-        when(store.configure(REGISTERED_GUILD_ID, "8001", "Welcome"))
+        when(store.find(REGISTERED_GUILD_ID))
+                .thenReturn(Optional.of(new StoredGuildWelcome(true, "8000", "Old", 1)));
+        when(store.configureExisting(REGISTERED_GUILD_ID, "8001", "Welcome", 1))
                 .thenThrow(new ObjectOptimisticLockingFailureException(
                         GuildWelcomeConfiguration.class, REGISTERED_GUILD_ID));
 

@@ -71,20 +71,40 @@ class WelcomeTemplateTest {
     }
 
     @Test
-    void rejectsTemplatesWhoseExpandedPreviewCouldExceedDiscordLimit() {
-        assertThatThrownBy(() -> WelcomeTemplate.parse("{server}".repeat(21)))
+    void templateExceedingBudgetUnderMaximumSanitizedExpansionIsRejected() {
+        // The stored template is tiny (72 chars) but each {server} can expand to 200 escaped
+        // characters, so nine of them (1800) overflow the administrative preview budget. Under
+        // the old synthetic 100-character server context this would have passed validation and
+        // only failed later at preview time for a Markdown-heavy guild name.
+        assertThatThrownBy(() -> WelcomeTemplate.parse("{server}".repeat(9)))
                 .isInstanceOf(InvalidWelcomeTemplateException.class);
     }
 
     @Test
-    void acceptedExpandedPreviewRemainsWithinDiscordLimit() {
-        WelcomeTemplate template = WelcomeTemplate.parse("{server}".repeat(16));
-        String rendered = WelcomeTemplateRenderer.render(
-                template.value(),
-                new WelcomePreviewContext("M".repeat(32), "S".repeat(100), Integer.MAX_VALUE));
+    void templateAcceptedByParseRendersWithMaximumSanitizedMemberAndServerValues() {
+        WelcomeTemplate template = WelcomeTemplate.parse(
+                "Welcome {member} to {server} — you are member #{memberCount}! {server}");
 
-        assertThat(rendered).hasSizeLessThanOrEqualTo(
-                WelcomeTemplateRenderer.DISCORD_MESSAGE_LIMIT);
+        String rendered = WelcomeTemplateRenderer.render(
+                template.value(), WelcomePreviewContext.maximum());
+
+        assertThat(rendered)
+                .contains("\\_".repeat(WelcomePreviewContext.MAX_RAW_MEMBER_DISPLAY_NAME_LENGTH))
+                .contains("\\_".repeat(WelcomePreviewContext.MAX_RAW_SERVER_NAME_LENGTH))
+                .contains(Integer.toString(Integer.MAX_VALUE))
+                .hasSizeLessThanOrEqualTo(WelcomeTemplateRenderer.DISCORD_MESSAGE_LIMIT);
+    }
+
+    @Test
+    void ordinaryMarkdownHeavyNamesRenderSuccessfully() {
+        WelcomeTemplate template =
+                WelcomeTemplate.parse("Welcome {member} to {server}! #{memberCount}");
+        // Already-escaped, realistic Markdown-heavy names well within the sanitized bounds.
+        WelcomePreviewContext context =
+                new WelcomePreviewContext("\\_\\_Artur\\*\\*", "\\~Heaven\\~", 42);
+
+        assertThat(WelcomeTemplateRenderer.render(template.value(), context))
+                .isEqualTo("Welcome \\_\\_Artur\\*\\* to \\~Heaven\\~! #42");
     }
 
     @Test

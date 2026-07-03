@@ -59,6 +59,9 @@ class GuildWelcomePersistenceIntegrationTest {
     private GuildWelcomeService service;
 
     @Autowired
+    private GuildWelcomeStore store;
+
+    @Autowired
     private GuildWelcomeConfigurationRepository repository;
 
     @Autowired
@@ -204,31 +207,125 @@ class GuildWelcomePersistenceIntegrationTest {
     }
 
     @Test
-    void concurrentInitialConfigureCreatesOnlyOneRowWithoutLeakingUniqueFailures() throws Exception {
-        onboard(GUILD_ID, "concurrent-initial");
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
+    void concurrentInitialConfigureProducesExactlyOneSuccessAndOneControlledConflict()
+            throws Exception {
+        RegisteredGuildView guild = onboard(GUILD_ID, "concurrent-initial");
+        CountDownLatch bothSnapshotted = new CountDownLatch(2);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
-            Future<String> first = executor.submit(() -> configureAfterSignal(
-                    ready, start, "820000000000000001", "Welcome one"));
-            Future<String> second = executor.submit(() -> configureAfterSignal(
-                    ready, start, "820000000000000002", "Welcome two"));
-            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
+            Future<String> first = executor.submit(() ->
+                    concurrencyFixture.createAfterSharedAbsentSnapshot(
+                            guild.registeredGuildId(),
+                            "820000000000000001",
+                            "Welcome one",
+                            bothSnapshotted));
+            Future<String> second = executor.submit(() ->
+                    concurrencyFixture.createAfterSharedAbsentSnapshot(
+                            guild.registeredGuildId(),
+                            "820000000000000002",
+                            "Welcome two",
+                            bothSnapshotted));
 
-            List<String> outcomes = List.of(
-                    first.get(10, TimeUnit.SECONDS),
-                    second.get(10, TimeUnit.SECONDS));
-            assertThat(outcomes).allMatch(outcome ->
-                    outcome.equals("success") || outcome.equals("conflict"));
-            assertThat(outcomes).contains("success");
+            String firstOutcome = first.get(10, TimeUnit.SECONDS);
+            String secondOutcome = second.get(10, TimeUnit.SECONDS);
+
+            // Exactly one success, exactly one controlled conflict — never two silent successes.
+            assertThat(List.of(firstOutcome, secondOutcome))
+                    .containsExactlyInAnyOrder("success", "conflict");
             assertThat(repository.count()).isEqualTo(1);
+
+            GuildWelcomeConfiguration stored = find(guild);
+            if (firstOutcome.equals("success")) {
+                assertThat(stored.getChannelId()).isEqualTo("820000000000000001");
+                assertThat(stored.getMessageTemplate()).isEqualTo("Welcome one");
+            } else {
+                assertThat(stored.getChannelId()).isEqualTo("820000000000000002");
+                assertThat(stored.getMessageTemplate()).isEqualTo("Welcome two");
+            }
         } finally {
-            start.countDown();
+            bothSnapshotted.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void createIfAbsentOnAnAlreadyPresentRowIsAControlledConflict() {
+        RegisteredGuildView guild = onboard(GUILD_ID, "create-race");
+        service.configure(GUILD_ID, "820000000000000001", "Welcome");
+
+        assertThatThrownBy(() -> store.createIfAbsent(
+                        guild.registeredGuildId(), "820000000000000002", "Other"))
+                .isInstanceOf(GuildWelcomeConflictException.class);
+        assertThat(repository.count()).isEqualTo(1);
+        assertThat(find(guild).getMessageTemplate()).isEqualTo("Welcome");
+    }
+
+    @Test
+    void configureExistingWithAChangedVersionIsAControlledConflict() {
+        RegisteredGuildView guild = onboard(GUILD_ID, "configure-stale");
+        service.configure(GUILD_ID, "820000000000000001", "Welcome");
+        service.configure(GUILD_ID, "820000000000000002", "Updated");
+
+        assertThatThrownBy(() -> store.configureExisting(
+                        guild.registeredGuildId(), "820000000000000003", "Stale", 0))
+                .isInstanceOf(GuildWelcomeConflictException.class);
+        assertThat(find(guild).getMessageTemplate()).isEqualTo("Updated");
+        assertThat(find(guild).getVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void configureExistingCurrentSnapshotWithIdenticalEnabledValuesIsANoOp() {
+        RegisteredGuildView guild = onboard(GUILD_ID, "configure-noop");
+        service.configure(GUILD_ID, "820000000000000001", "Welcome");
+        clock.setInstant(INITIAL_INSTANT.plus(Duration.ofMinutes(1)));
+
+        StoredGuildWelcome result = store.configureExisting(
+                guild.registeredGuildId(), "820000000000000001", "Welcome", 0);
+
+        assertThat(result.version()).isZero();
+        assertThat(find(guild).getUpdatedAt()).isEqualTo(INITIAL_INSTANT);
+    }
+
+    @Test
+    void configureExistingReEnablesADisabledCurrentSnapshot() {
+        RegisteredGuildView guild = onboard(GUILD_ID, "configure-reenable");
+        service.configure(GUILD_ID, "820000000000000001", "Welcome");
+        GuildWelcomeView disabled = service.disable(GUILD_ID);
+
+        StoredGuildWelcome result = store.configureExisting(
+                guild.registeredGuildId(), "820000000000000001", "Welcome", disabled.version());
+
+        assertThat(result.enabled()).isTrue();
+        assertThat(result.version()).isEqualTo(disabled.version() + 1);
+    }
+
+    @Test
+    void disableExistingOnAnAlreadyDisabledCurrentSnapshotIsANoOp() {
+        RegisteredGuildView guild = onboard(GUILD_ID, "disable-noop");
+        service.configure(GUILD_ID, "820000000000000001", "Welcome");
+        GuildWelcomeView disabled = service.disable(GUILD_ID);
+        clock.setInstant(INITIAL_INSTANT.plus(Duration.ofMinutes(1)));
+
+        StoredGuildWelcome result = store.disableExisting(
+                guild.registeredGuildId(), disabled.version());
+
+        assertThat(result.enabled()).isFalse();
+        assertThat(result.version()).isEqualTo(disabled.version());
+        assertThat(find(guild).getUpdatedAt()).isEqualTo(INITIAL_INSTANT);
+    }
+
+    @Test
+    void disableExistingAfterAConcurrentChangeIsAControlledConflict() {
+        RegisteredGuildView guild = onboard(GUILD_ID, "disable-stale");
+        service.configure(GUILD_ID, "820000000000000001", "Welcome");
+        long staleVersion = 0;
+        service.configure(GUILD_ID, "820000000000000002", "Changed");
+
+        assertThatThrownBy(() -> store.disableExisting(guild.registeredGuildId(), staleVersion))
+                .isInstanceOf(GuildWelcomeConflictException.class);
+        assertThat(find(guild).isEnabled()).isTrue();
+        assertThat(find(guild).getVersion()).isEqualTo(1);
     }
 
     @Test
@@ -286,21 +383,6 @@ class GuildWelcomePersistenceIntegrationTest {
         return repository.findByRegisteredGuildId(guild.registeredGuildId()).orElseThrow();
     }
 
-    private String configureAfterSignal(
-            CountDownLatch ready,
-            CountDownLatch start,
-            String channelId,
-            String template) throws InterruptedException {
-        ready.countDown();
-        start.await();
-        try {
-            service.configure(GUILD_ID, channelId, template);
-            return "success";
-        } catch (GuildWelcomeConflictException exception) {
-            return "conflict";
-        }
-    }
-
     private static int failureCount(Future<?>... futures) throws Exception {
         int failures = 0;
         for (Future<?> future : futures) {
@@ -337,17 +419,44 @@ class GuildWelcomePersistenceIntegrationTest {
 
         @Bean
         ConcurrencyFixture guildWelcomeConcurrencyFixture(
-                GuildWelcomeConfigurationRepository repository) {
-            return new ConcurrencyFixture(repository);
+                GuildWelcomeConfigurationRepository repository, GuildWelcomeStore store) {
+            return new ConcurrencyFixture(repository, store);
         }
     }
 
     static class ConcurrencyFixture {
 
         private final GuildWelcomeConfigurationRepository repository;
+        private final GuildWelcomeStore store;
 
-        ConcurrencyFixture(GuildWelcomeConfigurationRepository repository) {
+        ConcurrencyFixture(GuildWelcomeConfigurationRepository repository, GuildWelcomeStore store) {
             this.repository = repository;
+            this.store = store;
+        }
+
+        /**
+         * Replicates the service's absent-snapshot configure path: each caller confirms an absent
+         * snapshot in its own read transaction, waits until both have done so, then races to
+         * create. This is intentionally not {@code @Transactional} so {@code store.find} and
+         * {@code store.createIfAbsent} each run in their own short transaction, exactly as the
+         * service invokes them.
+         */
+        public String createAfterSharedAbsentSnapshot(
+                UUID registeredGuildId,
+                String channelId,
+                String template,
+                CountDownLatch bothSnapshotted) {
+            if (store.find(registeredGuildId).isPresent()) {
+                throw new IllegalStateException("Expected an absent snapshot before the create race");
+            }
+            bothSnapshotted.countDown();
+            awaitShared(bothSnapshotted, "create race");
+            try {
+                store.createIfAbsent(registeredGuildId, channelId, template);
+                return "success";
+            } catch (GuildWelcomeConflictException conflict) {
+                return "conflict";
+            }
         }
 
         @Transactional
@@ -360,16 +469,21 @@ class GuildWelcomePersistenceIntegrationTest {
             GuildWelcomeConfiguration configuration =
                     repository.findByRegisteredGuildId(registeredGuildId).orElseThrow();
             bothLoaded.countDown();
+            awaitShared(bothLoaded, "shared load");
+            configuration.configure(channelId, template, now);
+            repository.flush();
+        }
+
+        private static void awaitShared(CountDownLatch latch, String phase) {
             try {
-                if (!bothLoaded.await(5, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("Concurrent update did not reach the shared load");
+                if (!latch.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException(
+                            "Concurrent operation did not reach the " + phase);
                 }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("Concurrent update was interrupted", exception);
+                throw new IllegalStateException("Concurrent operation was interrupted", exception);
             }
-            configuration.configure(channelId, template, now);
-            repository.flush();
         }
     }
 }

@@ -183,6 +183,61 @@ class DiscordWelcomeCommandListenerTest {
     }
 
     @Test
+    void statusTruncatesOnlyTheTemplateAndPreservesAllMetadata() {
+        InteractionHarness interaction = interaction("status", true);
+        String longGuildName = "G".repeat(90);
+        String longChannelName = "c".repeat(90);
+        // 1000 underscores deterministically escape to 1800 characters, overflowing the budget.
+        String markdownHeavyTemplate = "_".repeat(1000);
+
+        GuildChannel storedChannel = mock(GuildChannel.class);
+        when(storedChannel.getType()).thenReturn(ChannelType.TEXT);
+        when(storedChannel.getName()).thenReturn(longChannelName);
+        when(interaction.guild().getGuildChannelById("stored-channel-id"))
+                .thenReturn(storedChannel);
+        when(interaction.selfMember().hasPermission(storedChannel, Permission.VIEW_CHANNEL))
+                .thenReturn(true);
+        when(interaction.selfMember().hasPermission(storedChannel, Permission.MESSAGE_SEND))
+                .thenReturn(true);
+        when(welcomeService.status(GUILD_ID)).thenReturn(new GuildWelcomeView(
+                GuildWelcomeState.CONFIGURED,
+                longGuildName,
+                true,
+                "stored-channel-id",
+                markdownHeavyTemplate,
+                null,
+                7));
+
+        listener.onSlashCommandInteraction(interaction.event());
+
+        String message = interaction.message();
+        assertThat(message).hasSizeLessThanOrEqualTo(2000);
+        assertThat(message)
+                .contains("Welcome configuration")
+                .contains("Server: " + longGuildName)
+                .contains("Status: Enabled")
+                .contains("Channel: #" + longChannelName)
+                .contains("Version: 7")
+                .contains("... (template truncated)")
+                .doesNotContain("stored-channel-id");
+        assertEphemeralSafeReply(interaction);
+    }
+
+    @Test
+    void statusWithAShortTemplateIsNotTruncated() {
+        InteractionHarness interaction = interaction("status", true);
+        when(welcomeService.status(GUILD_ID)).thenReturn(configured(
+                true, "deleted-channel-id", "Welcome {member} to {server}!", null, 2));
+
+        listener.onSlashCommandInteraction(interaction.event());
+
+        assertThat(interaction.message())
+                .contains("Template: Welcome {member} to {server}!", "Version: 2")
+                .doesNotContain("... (template truncated)");
+        assertEphemeralSafeReply(interaction);
+    }
+
+    @Test
     void previewUsesSafeLiveValuesAllowsDisabledStateAndNeverSendsToChannel() {
         InteractionHarness interaction = interaction("preview", true);
         when(interaction.member().getEffectiveName()).thenReturn("Artur");

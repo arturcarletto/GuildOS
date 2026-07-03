@@ -160,7 +160,7 @@ The authoritative guild command catalog also registers `/welcome` with four subc
 
 - `/welcome status` reads the current configuration.
 - `/welcome configure channel:<channel> message:<template>` creates or updates the configuration and automatically enables it.
-- `/welcome preview` renders the saved template only in the invoking administrator's ephemeral command response; it sends nothing to the configured channel.
+- `/welcome preview` renders the saved template only in the invoking server manager's ephemeral command response; it sends nothing to the configured channel.
 - `/welcome disable` disables delivery while preserving the selected channel and template for later preview or re-enabling.
 
 Discord exposes `/welcome` to members with Manage Server by default, and Guild OS independently rechecks the invoking member's effective Manage Server permission on every interaction. Discord owner and administrator semantics are handled by JDA's effective permission check. The guild must also be currently connected and have at least one active Guild OS onboarding authorization. Discord command administration does not fabricate an operator identity or require the invoking member to have used browser OAuth.

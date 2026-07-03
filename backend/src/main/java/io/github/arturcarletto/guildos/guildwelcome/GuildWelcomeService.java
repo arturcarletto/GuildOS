@@ -1,5 +1,6 @@
 package io.github.arturcarletto.guildos.guildwelcome;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -43,9 +44,16 @@ public class GuildWelcomeService {
             return access.result();
         }
         WelcomeTemplate template = WelcomeTemplate.parse(rawTemplate);
+        Optional<StoredGuildWelcome> snapshot = store.find(access.registeredGuildId());
         try {
-            StoredGuildWelcome stored =
-                    store.configure(access.registeredGuildId(), channelId, template.value());
+            StoredGuildWelcome stored = snapshot
+                    .map(current -> store.configureExisting(
+                            access.registeredGuildId(),
+                            channelId,
+                            template.value(),
+                            current.version()))
+                    .orElseGet(() -> store.createIfAbsent(
+                            access.registeredGuildId(), channelId, template.value()));
             return GuildWelcomeView.configured(access.guildName(), stored);
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildWelcomeConflictException();
@@ -71,10 +79,14 @@ public class GuildWelcomeService {
         if (access.result() != null) {
             return access.result();
         }
+        Optional<StoredGuildWelcome> snapshot = store.find(access.registeredGuildId());
+        if (snapshot.isEmpty()) {
+            return GuildWelcomeView.notConfigured(access.guildName());
+        }
         try {
-            return store.disable(access.registeredGuildId())
-                    .map(stored -> GuildWelcomeView.configured(access.guildName(), stored))
-                    .orElseGet(() -> GuildWelcomeView.notConfigured(access.guildName()));
+            StoredGuildWelcome stored = store.disableExisting(
+                    access.registeredGuildId(), snapshot.get().version());
+            return GuildWelcomeView.configured(access.guildName(), stored);
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildWelcomeConflictException();
         }
