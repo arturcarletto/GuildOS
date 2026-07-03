@@ -1,10 +1,10 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, and the guild-scoped `/guildos status` command.
+Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, the guild-scoped `/status` command, and Discord administration of persistent welcome configuration and ephemeral previews.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, and an ephemeral read-only Discord status command. Bot Gateway and human OAuth integrations are independently disabled by default. Additional commands, message and member event collection, moderation rules, broader guild management, community analytics, automation, AI features, and a frontend are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, an ephemeral read-only Discord status command, and persistent welcome configuration with ephemeral administration and preview commands. Bot Gateway and human OAuth integrations are independently disabled by default. Welcome delivery, message and member event collection, moderation rules, broader guild management, community analytics, automation, AI features, and a frontend are not implemented yet.
 
 ## Technology stack
 
@@ -131,7 +131,7 @@ Remove-Item Env:DISCORD_BOT_TOKEN
 
 ## Use the Discord status command
 
-`/guildos status` is the first implemented Discord command. It is registered as a guild-scoped command for every currently connected guild on Gateway ready and for newly joined guilds. It is available to normal guild members, has no options, does not require Administrator or Manage Server permission, and responds ephemerally so status checks do not clutter a channel. It is not available in direct messages.
+`/status` is the first implemented Discord command. It is registered as a guild-scoped command for every currently connected guild on Gateway ready and for newly joined guilds. It is available to normal guild members, has no options, does not require Administrator or Manage Server permission, and responds ephemerally so status checks do not clutter a channel. It is not available in direct messages.
 
 Install the bot with both the bot and application-command scopes, requesting no Discord permissions for this read-only command:
 
@@ -141,18 +141,54 @@ https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot%20appl
 
 Bot installation and human operator login are separate flows. The installation URL adds this Discord application and its commands to a server. `/oauth2/authorization/discord` signs a human operator into Guild OS so they can onboard and configure eligible guilds. Do not use the human OAuth callback URL (`/login/oauth2/code/discord`) as the bot installation redirect.
 
-For an onboarded guild, `/guildos status` reports the safe guild name, connected state, active onboarding state, timezone, locale, and settings version. If settings have never been materialized through the authorized HTTP API, the command reports `UTC`, `en-US`, and version `0` without creating a settings row. A connected guild that has not been onboarded receives a safe explanation that an eligible operator must sign in and complete onboarding. The command never exposes operator records, internal ids, Discord permissions, OAuth credentials, sessions, or bot credentials.
+For an onboarded guild, `/status` reports the safe guild name, connected state, active onboarding state, timezone, locale, and settings version. If settings have never been materialized through the authorized HTTP API, the command reports `UTC`, `en-US`, and version `0` without creating a settings row. A connected guild that has not been onboarded receives a safe explanation that an eligible operator must sign in and complete onboarding. The command never exposes operator records, internal ids, Discord permissions, OAuth credentials, sessions, or bot credentials.
 
 To verify locally:
 
 1. Start PostgreSQL and configure the Discord Gateway and human OAuth environment variables described in this README.
 2. Install the bot in a test guild with the URL template above and start Guild OS.
 3. Sign in through `http://localhost:8080/oauth2/authorization/discord`, onboard the test guild, and configure its timezone and locale through the existing settings API.
-4. Run `/guildos status` in the guild and confirm the ephemeral response contains the configured values.
+4. Run `/status` in the guild and confirm the ephemeral response contains the configured values.
 5. Install the bot in a second, non-onboarded guild and confirm the command returns the onboarding-required response.
 6. Restart Guild OS and confirm guild-scoped command reconciliation remains idempotent and the command still responds.
 
-Current command limitations are deliberate: there are no moderation or welcome commands, message/member collection, analytics, scheduled automation, AI features, command localization, global command rollout, or frontend.
+Command limitations are deliberate: there is no real welcome delivery, moderation, message/member collection, analytics, scheduled automation, AI functionality, command localization, global command rollout, or frontend.
+
+## Manage welcome configuration from Discord
+
+The authoritative guild command catalog also registers `/welcome` with four subcommands:
+
+- `/welcome status` reads the current configuration.
+- `/welcome configure channel:<channel> message:<template>` creates or updates the configuration and automatically enables it.
+- `/welcome preview` renders the saved template only in the invoking server manager's ephemeral command response; it sends nothing to the configured channel.
+- `/welcome disable` disables delivery while preserving the selected channel and template for later preview or re-enabling.
+
+Discord exposes `/welcome` to members with Manage Server by default, and Guild OS independently rechecks the invoking member's effective Manage Server permission on every interaction. Discord owner and administrator semantics are handled by JDA's effective permission check. The guild must also be currently connected and have at least one active Guild OS onboarding authorization. Discord command administration does not fabricate an operator identity or require the invoking member to have used browser OAuth.
+
+The configure channel must be a standard guild text or announcement channel in the invoking guild. The bot must have effective View Channel and Send Messages permissions in that channel; Administrator permission is neither requested nor required. A deleted or newly inaccessible saved channel is reported safely by status and preview without deleting the persisted configuration.
+
+Templates are normalized to LF line endings, trimmed only at their outer boundary, and limited to 1000 stored characters. They may be static or use these deterministic placeholders:
+
+- `{member}` — the invoking member's safe effective display name in preview;
+- `{server}` — the current safe guild name;
+- `{memberCount}` — the current JDA guild member count.
+
+Unknown placeholders, `@everyone`, `@here`, and raw Discord user, role, or channel mention syntax are rejected. Administrative replies disable all allowed mentions. Previewing a disabled configuration is supported and clearly labeled, but no public Discord message is sent.
+
+To verify the feature manually in a test guild:
+
+1. Start PostgreSQL, enable the Discord Gateway, enable human Discord OAuth, and start Guild OS.
+2. Install the bot with the `bot` and `applications.commands` scopes, then grant it View Channel and Send Messages only in the intended test channel.
+3. Complete browser OAuth onboarding for the connected test guild.
+4. Confirm command reconciliation exposes `/status` plus `/welcome status`, `/welcome configure`, `/welcome preview`, and `/welcome disable`.
+5. As a member without Manage Server, confirm welcome administration is unavailable or denied; then repeat as a member with Manage Server.
+6. Configure `#welcome` with `Welcome {member} to {server}! You are member #{memberCount}.` and confirm the response is ephemeral.
+7. Run status and preview, confirm the rendered values, and confirm no message appears in `#welcome`.
+8. Disable the configuration, confirm status remains persisted, and confirm preview still works with a disabled warning.
+9. Remove the bot's Send Messages permission and confirm a new configure attempt is rejected. Delete the configured channel and confirm status/preview report it as unavailable without deleting the row.
+10. Restart Guild OS and confirm the configuration persists.
+
+This milestone intentionally does not handle `GuildMemberJoinEvent` or deliver welcome messages. No Guild Members privileged intent—or any other optional Gateway intent—is enabled. Member-join delivery and its intent assessment belong to GUILD-009.
 
 ## Authenticate operators with Discord OAuth2
 

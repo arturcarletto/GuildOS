@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
+import io.github.arturcarletto.guildos.guildwelcome.GuildWelcomeService;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(DiscordProperties.class)
@@ -44,12 +45,20 @@ class DiscordConfiguration {
 
     @Bean
     @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordWelcomeCommandListener discordWelcomeCommandListener(
+            GuildWelcomeService welcomeService) {
+        return new DiscordWelcomeCommandListener(welcomeService);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
     DiscordJdaFactory discordJdaFactory(
             DiscordGuildEventListener guildEventListener,
-            DiscordSlashCommandListener slashCommandListener) {
+            DiscordSlashCommandListener slashCommandListener,
+            DiscordWelcomeCommandListener welcomeCommandListener) {
         return token -> JDABuilder.createLight(token, gatewayIntents())
                 .setAutoReconnect(true)
-                .addEventListeners(guildEventListener, slashCommandListener)
+                .addEventListeners(guildEventListener, slashCommandListener, welcomeCommandListener)
                 .build();
     }
 
