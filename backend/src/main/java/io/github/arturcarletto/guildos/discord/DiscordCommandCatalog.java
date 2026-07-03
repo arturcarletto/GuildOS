@@ -1,0 +1,23 @@
+package io.github.arturcarletto.guildos.discord;
+
+import java.util.List;
+
+import net.dv8tion.jda.api.interactions.InteractionContextType;
+import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
+import net.dv8tion.jda.api.interactions.commands.build.CommandData;
+import net.dv8tion.jda.api.interactions.commands.build.Commands;
+import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
+
+/** Authoritative catalog of every Guild OS command registered for this Discord application. */
+final class DiscordCommandCatalog {
+
+    List<CommandData> commands() {
+        CommandData guildOs = Commands.slash("guildos", "Guild OS commands")
+                .setContexts(InteractionContextType.GUILD)
+                .setDefaultPermissions(DefaultMemberPermissions.ENABLED)
+                .addSubcommands(new SubcommandData(
+                        "status",
+                        "Show Guild OS status for this server"));
+        return List.of(guildOs);
+    }
+}

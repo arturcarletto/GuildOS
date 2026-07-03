@@ -1,10 +1,10 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, and authorized persistent guild settings.
+Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, and the guild-scoped `/guildos status` command.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, and persistent per-guild timezone and locale settings. Bot Gateway and human OAuth integrations are independently disabled by default. Commands, message and member event collection, moderation rules, broader guild management, community analytics, automation, AI features, and a frontend are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, and an ephemeral read-only Discord status command. Bot Gateway and human OAuth integrations are independently disabled by default. Additional commands, message and member event collection, moderation rules, broader guild management, community analytics, automation, AI features, and a frontend are not implemented yet.
 
 ## Technology stack
 
@@ -129,6 +129,31 @@ Remove-Item Env:GUILDOS_DISCORD_ENABLED
 Remove-Item Env:DISCORD_BOT_TOKEN
 ```
 
+## Use the Discord status command
+
+`/guildos status` is the first implemented Discord command. It is registered as a guild-scoped command for every currently connected guild on Gateway ready and for newly joined guilds. It is available to normal guild members, has no options, does not require Administrator or Manage Server permission, and responds ephemerally so status checks do not clutter a channel. It is not available in direct messages.
+
+Install the bot with both the bot and application-command scopes, requesting no Discord permissions for this read-only command:
+
+```text
+https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot%20applications.commands&permissions=0
+```
+
+Bot installation and human operator login are separate flows. The installation URL adds this Discord application and its commands to a server. `/oauth2/authorization/discord` signs a human operator into Guild OS so they can onboard and configure eligible guilds. Do not use the human OAuth callback URL (`/login/oauth2/code/discord`) as the bot installation redirect.
+
+For an onboarded guild, `/guildos status` reports the safe guild name, connected state, active onboarding state, timezone, locale, and settings version. If settings have never been materialized through the authorized HTTP API, the command reports `UTC`, `en-US`, and version `0` without creating a settings row. A connected guild that has not been onboarded receives a safe explanation that an eligible operator must sign in and complete onboarding. The command never exposes operator records, internal ids, Discord permissions, OAuth credentials, sessions, or bot credentials.
+
+To verify locally:
+
+1. Start PostgreSQL and configure the Discord Gateway and human OAuth environment variables described in this README.
+2. Install the bot in a test guild with the URL template above and start Guild OS.
+3. Sign in through `http://localhost:8080/oauth2/authorization/discord`, onboard the test guild, and configure its timezone and locale through the existing settings API.
+4. Run `/guildos status` in the guild and confirm the ephemeral response contains the configured values.
+5. Install the bot in a second, non-onboarded guild and confirm the command returns the onboarding-required response.
+6. Restart Guild OS and confirm guild-scoped command reconciliation remains idempotent and the command still responds.
+
+Current command limitations are deliberate: there are no moderation or welcome commands, message/member collection, analytics, scheduled automation, AI features, command localization, global command rollout, or frontend.
+
 ## Authenticate operators with Discord OAuth2
 
 Human operator login is separate from the JDA bot connection and is disabled by default. The flow requests only the `identify` and `guilds` scopes; it never requests bot-installation scopes. In the Discord Developer Portal, add this OAuth2 redirect URI:
@@ -226,7 +251,7 @@ The timezone must be a valid Java/IANA zone id and the locale must be a well-for
 
 `GET` needs no CSRF token. `PUT` requires the token from `GET /api/v1/csrf` and returns `403` with `{"error":"forbidden"}` when it is missing. Unknown guilds, missing access, and revoked access all return the same JSON `404`. Settings remain readable and writable while the bot is temporarily disconnected as long as the operator's persisted authorization remains active. Two authorized operators for the same guild see the same settings resource.
 
-The settings API does not call Discord and never exposes internal persistence ids, operator ids, OAuth tokens, permission bitsets, session identifiers, or client secrets. It does not implement commands, moderation or welcome-message execution, additional guild policy fields, or a frontend.
+The settings API does not call Discord and never exposes internal persistence ids, operator ids, OAuth tokens, permission bitsets, session identifiers, or client secrets. It does not implement moderation or welcome-message execution, additional guild policy fields, or a frontend.
 
 ### CSRF tokens for API clients
 

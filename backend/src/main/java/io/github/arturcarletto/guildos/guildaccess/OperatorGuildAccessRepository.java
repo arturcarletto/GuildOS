@@ -71,4 +71,6 @@ interface OperatorGuildAccessRepository extends JpaRepository<OperatorGuildAcces
 
     List<OperatorGuildAccess> findByOperatorIdAndRegisteredGuildIdIn(
             UUID operatorId, Collection<UUID> registeredGuildIds);
+
+    boolean existsByRegisteredGuildIdAndRevokedAtIsNull(UUID registeredGuildId);
 }
