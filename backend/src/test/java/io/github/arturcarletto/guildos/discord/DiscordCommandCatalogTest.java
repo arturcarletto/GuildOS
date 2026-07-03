@@ -1,6 +1,5 @@
 package io.github.arturcarletto.guildos.discord;
 
-import net.dv8tion.jda.api.interactions.InteractionContextType;
 import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
@@ -18,7 +17,6 @@ class DiscordCommandCatalogTest {
         CommandData command = catalog.commands().get(0);
 
         assertThat(command.getName()).isEqualTo("guildos");
-        assertThat(command.getContexts()).containsExactly(InteractionContextType.GUILD);
         assertThat(command.getDefaultPermissions()).isSameAs(DefaultMemberPermissions.ENABLED);
         assertThat(command).isInstanceOf(SlashCommandData.class);
 

@@ -2,7 +2,6 @@ package io.github.arturcarletto.guildos.discord;
 
 import java.util.List;
 
-import net.dv8tion.jda.api.interactions.InteractionContextType;
 import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
@@ -13,7 +12,6 @@ final class DiscordCommandCatalog {
 
     List<CommandData> commands() {
         CommandData guildOs = Commands.slash("guildos", "Guild OS commands")
-                .setContexts(InteractionContextType.GUILD)
                 .setDefaultPermissions(DefaultMemberPermissions.ENABLED)
                 .addSubcommands(new SubcommandData(
                         "status",
