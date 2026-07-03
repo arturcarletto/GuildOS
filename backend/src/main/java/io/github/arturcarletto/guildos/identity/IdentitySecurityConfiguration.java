@@ -28,7 +28,8 @@ class IdentitySecurityConfiguration {
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint(new JsonAuthenticationEntryPoint()))
+                        .authenticationEntryPoint(new JsonAuthenticationEntryPoint())
+                        .accessDeniedHandler(new JsonAccessDeniedHandler()))
                 .csrf(Customizer.withDefaults())
                 .logout(logout -> logout
                         .logoutSuccessHandler((request, response, authentication) ->

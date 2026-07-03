@@ -23,7 +23,7 @@ class DiscordOAuthClientConfiguration {
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .redirectUri(properties.getRedirectUri())
-                .scope("identify")
+                .scope("identify", "guilds")
                 .authorizationUri("https://discord.com/oauth2/authorize")
                 .tokenUri("https://discord.com/api/oauth2/token")
                 .userInfoUri("https://discord.com/api/v10/users/@me")

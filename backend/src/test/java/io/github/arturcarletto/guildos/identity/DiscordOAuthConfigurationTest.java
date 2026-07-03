@@ -84,7 +84,7 @@ class DiscordOAuthConfigurationTest {
                             .isEqualTo(ClientAuthenticationMethod.CLIENT_SECRET_BASIC);
                     assertThat(registration.getRedirectUri())
                             .isEqualTo("{baseUrl}/login/oauth2/code/discord");
-                    assertThat(registration.getScopes()).containsExactly("identify");
+                    assertThat(registration.getScopes()).containsExactly("identify", "guilds");
                     assertThat(registration.getProviderDetails().getAuthorizationUri())
                             .isEqualTo("https://discord.com/oauth2/authorize");
                     assertThat(registration.getProviderDetails().getTokenUri())

@@ -72,7 +72,7 @@ class DiscordOAuthLoginIntegrationTest {
         Map<String, String> params = queryParameters(redirect);
         assertThat(params).containsEntry("response_type", "code");
         assertThat(params).containsEntry("client_id", "fake-client-id");
-        assertThat(params).containsEntry("scope", "identify");
+        assertThat(params).containsEntry("scope", "identify guilds");
         assertThat(params).containsEntry("redirect_uri", "http://localhost/login/oauth2/code/discord");
         assertThat(params.get("state")).isNotBlank();
 
