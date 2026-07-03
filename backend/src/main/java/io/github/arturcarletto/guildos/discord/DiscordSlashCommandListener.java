@@ -16,8 +16,7 @@ import io.github.arturcarletto.guildos.guildstatus.GuildStatusView;
 final class DiscordSlashCommandListener extends ListenerAdapter {
 
     private static final Logger logger = LoggerFactory.getLogger(DiscordSlashCommandListener.class);
-    private static final String COMMAND_NAME = "guildos";
-    private static final String STATUS_SUBCOMMAND = "status";
+    private static final String COMMAND_NAME = "status";
     private static final String UNAVAILABLE_MESSAGE =
             "Guild OS is not ready for this server. Please try again later.";
     private static final String FAILURE_MESSAGE =
@@ -31,8 +30,7 @@ final class DiscordSlashCommandListener extends ListenerAdapter {
 
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
-        if (!COMMAND_NAME.equals(event.getName())
-                || !STATUS_SUBCOMMAND.equals(event.getSubcommandName())) {
+        if (!COMMAND_NAME.equals(event.getName())) {
             return;
         }
         Guild guild = event.isFromGuild() ? event.getGuild() : null;
@@ -103,10 +101,9 @@ final class DiscordSlashCommandListener extends ListenerAdapter {
 
     private void logFailure(String operation, String guildId, Throwable failure) {
         logger.warn(
-                "Discord slash command operation failed: command={}, subcommand={}, guildId={}, "
+                "Discord slash command operation failed: command={}, guildId={}, "
                         + "operation={}, failureCategory={}",
                 COMMAND_NAME,
-                STATUS_SUBCOMMAND,
                 guildId,
                 operation,
                 failureCategory(failure));
