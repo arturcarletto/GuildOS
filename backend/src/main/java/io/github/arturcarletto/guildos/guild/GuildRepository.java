@@ -1,6 +1,8 @@
 package io.github.arturcarletto.guildos.guild;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -52,4 +54,8 @@ interface GuildRepository extends JpaRepository<Guild, UUID> {
     Optional<Guild> findByDiscordGuildIdForUpdate(@Param("discordGuildId") String discordGuildId);
 
     Optional<Guild> findByDiscordGuildId(String discordGuildId);
+
+    List<Guild> findAllByDiscordGuildIdIn(Collection<String> discordGuildIds);
+
+    List<Guild> findAllByIdIn(Collection<UUID> ids);
 }

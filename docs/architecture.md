@@ -4,7 +4,7 @@
 
 Guild OS starts as one deployable Spring Boot application organized by business capability. A modular monolith keeps local development, testing, deployment, and database consistency straightforward while the product boundaries and workload patterns are still being discovered. Package boundaries can provide separation without introducing network calls, distributed transactions, duplicated operational tooling, or premature service ownership.
 
-The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, and transactional connection use cases. The `identity` package owns Discord OAuth client configuration, Spring Security policy, local operator accounts, OAuth profile mapping, authenticated principals, and the current-operator API. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
+The implemented `discord` package is the JDA infrastructure boundary for Gateway configuration, connection lifecycle, guild lifecycle events, and health reporting. The `guild` package owns the persistent guild model, repository, platform-neutral commands, transactional connection use cases, and a read-only `GuildDirectory` contract that exposes safe registered-guild projections to other capabilities. The `identity` package owns Discord OAuth client configuration, Spring Security policy, local operator accounts, OAuth profile mapping, authenticated principals, and the current-operator API. The `guildaccess` package owns operator-to-guild authorization: the Discord guild client, permission and eligibility evaluation, the persistent operator-to-guild relationship, and the onboarding and guild-access APIs. Other feature packages will be added when their behavior is implemented; there are no empty placeholder modules.
 
 ## Intended modules
 
@@ -39,13 +39,25 @@ The listener handles only guild ready, join, and leave lifecycle signals. It doe
 ## Operator authentication flow
 
 1. A browser explicitly requests `/oauth2/authorization/discord`.
-2. Spring Security creates the authorization request and OAuth state, then redirects to Discord with only the `identify` scope.
+2. Spring Security creates the authorization request and OAuth state, then redirects to Discord with only the `identify` and `guilds` scopes.
 3. Spring Security handles the authorization-code callback and retrieves Discord user information.
 4. The identity OAuth adapter validates and maps safe profile attributes into a platform-neutral login command.
 5. The identity service creates or updates the operator account in PostgreSQL and returns the local operator identity.
 6. Spring Security stores the authenticated principal in the server-side HTTP session and redirects to `/api/v1/me`.
 
-The dependency direction is: Browser -> Spring Security OAuth2 -> Discord user-info -> identity service -> PostgreSQL -> authenticated session. This human operator OAuth login is separate from the JDA bot Gateway in the `discord` package; the two integrations are enabled independently, and neither depends on the other. Access and refresh tokens are not stored in Guild OS domain tables or exposed through the API. Authentication establishes operator identity only; guild-management authorization and onboarding are not implemented and remain separate future capabilities. Sessions are local to the single application instance and require a deliberate scaling design before multiple instances are deployed.
+The dependency direction is: Browser -> Spring Security OAuth2 -> Discord user-info -> identity service -> PostgreSQL -> authenticated session. This human operator OAuth login is separate from the JDA bot Gateway in the `discord` package; the two integrations are enabled independently, and neither depends on the other. Access and refresh tokens are not stored in Guild OS domain tables or exposed through the API. Authentication establishes operator identity; the `guildaccess` capability, described next, builds the first authorization boundary on top of it. Sessions are local to the single application instance and require a deliberate scaling design before multiple instances are deployed.
+
+## Guild onboarding and operator authorization flow
+
+The `guildaccess` package answers "which guilds may this operator manage?". It is deliberately a separate capability from `identity` (which authenticates operators) and `guild` (which owns the bot registry): keeping authentication, the bot registry, and operator-to-guild authorization in distinct packages gives each clear ownership, and `guildaccess` depends on the other two only through their public application-facing contracts (`AuthenticatedOperator` and `GuildDirectory`). This aligns with the intended "identity and access" boundary while avoiding a generic catch-all package.
+
+1. An authenticated operator calls an onboarding or guild-access endpoint under `/api/v1/**`.
+2. The controller resolves the operator principal and, for Discord-backed reads, loads the operator's OAuth access token from Spring Security's authorized-client store; a missing authorized client yields a controlled JSON 401 rather than a redirect.
+3. The guild-access application service verifies eligibility from the operator's current Discord guild list, mapping Discord ownership or the `ADMINISTRATOR`/`MANAGE_GUILD` permission bits to a Guild OS role; it never trusts a client-supplied claim.
+4. The service confirms the bot is currently connected to the guild through the `GuildDirectory` registry contract.
+5. It creates, reactivates, updates, or revokes the persistent operator-to-guild authorization in PostgreSQL, capturing one clock instant per operation.
+
+The dependency direction is: HTTP controller -> guild-access application service -> operator and guild repositories plus the Discord OAuth guild client -> PostgreSQL. OAuth eligibility (from Discord) and bot presence (from the registry) are independent conditions; onboarding requires both. Discord access and refresh tokens are never persisted in domain tables or exposed by any API; the access token flows only as a transient parameter to the Discord client. Each operator's authorization is isolated: no operator can read or revoke another's. Revocation is soft and idempotent, preserving history and allowing later reactivation. This establishes authorization foundations only; full guild management is not implemented. The authorized-client and session state is single-instance and must be revisited before horizontal scaling.
 
 ## Initial request and database flow
 
