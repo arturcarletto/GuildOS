@@ -1,13 +1,20 @@
 package io.github.arturcarletto.guildos.discord;
 
+import java.time.Clock;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
+import io.github.arturcarletto.guildos.guildmembermessage.GuildMemberMessageService;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
-import io.github.arturcarletto.guildos.guildwelcome.GuildWelcomeService;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 
 class DiscordConfigurationTest {
@@ -16,7 +23,9 @@ class DiscordConfigurationTest {
             .withUserConfiguration(DiscordConfiguration.class)
             .withBean(GuildConnectionService.class, () -> mock(GuildConnectionService.class))
             .withBean(GuildStatusService.class, () -> mock(GuildStatusService.class))
-            .withBean(GuildWelcomeService.class, () -> mock(GuildWelcomeService.class));
+            .withBean(GuildMemberMessageService.class, () -> mock(GuildMemberMessageService.class))
+            .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+            .withBean(Clock.class, Clock::systemUTC);
 
     @Test
     void disabledIntegrationDoesNotRequireATokenOrCreateGatewayBeans() {
@@ -29,9 +38,30 @@ class DiscordConfigurationTest {
                     assertThat(context).doesNotHaveBean(DiscordHealthIndicator.class);
                     assertThat(context).doesNotHaveBean(DiscordGuildEventListener.class);
                     assertThat(context).doesNotHaveBean(DiscordSlashCommandListener.class);
-                    assertThat(context).doesNotHaveBean(DiscordWelcomeCommandListener.class);
+                    assertThat(context).doesNotHaveBean(DiscordMemberMessageCommandListener.class);
+                    assertThat(context).doesNotHaveBean(DiscordMemberLifecycleListener.class);
                     assertThat(context).doesNotHaveBean(DiscordGuildCommandRegistrar.class);
                     assertThat(context).doesNotHaveBean(DiscordCommandCatalog.class);
+                });
+    }
+
+    @Test
+    void enabledIntegrationRegistersMemberMessageListeners() {
+        // Override the JDA factory with a stub so the gateway starts without a real connection.
+        JDA jda = mock(JDA.class, RETURNS_DEEP_STUBS);
+        contextRunner
+                .withAllowBeanDefinitionOverriding(true)
+                .withBean("discordJdaFactory", DiscordJdaFactory.class, () -> token -> jda)
+                .withPropertyValues(
+                        "guildos.discord.enabled=true",
+                        "guildos.discord.token=test-token")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(DiscordMemberMessageCommandListener.class);
+                    assertThat(context).hasSingleBean(DiscordMemberLifecycleListener.class);
+                    assertThat(context).hasSingleBean(DiscordMemberMessageEmbedFactory.class);
+                    assertThat(context).hasSingleBean(DiscordMemberMessageChannelResolver.class);
+                    assertThat(context).hasSingleBean(DiscordMemberMessageDeliveryMetrics.class);
                 });
     }
 
@@ -59,7 +89,8 @@ class DiscordConfigurationTest {
     }
 
     @Test
-    void gatewayUsesNoAdditionalIntents() {
-        assertThat(DiscordConfiguration.gatewayIntents()).isEmpty();
+    void gatewayEnablesOnlyTheGuildMembersPrivilegedIntent() {
+        assertThat(DiscordConfiguration.gatewayIntents())
+                .containsExactly(GatewayIntent.GUILD_MEMBERS);
     }
 }
