@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
+import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(DiscordProperties.class)
@@ -17,17 +18,43 @@ class DiscordConfiguration {
 
     @Bean
     @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
-    DiscordGuildEventListener discordGuildEventListener(GuildConnectionService guildConnectionService) {
-        return new DiscordGuildEventListener(guildConnectionService);
+    DiscordCommandCatalog discordCommandCatalog() {
+        return new DiscordCommandCatalog();
     }
 
     @Bean
     @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
-    DiscordJdaFactory discordJdaFactory(DiscordGuildEventListener guildEventListener) {
-        return token -> JDABuilder.createLight(token, EnumSet.noneOf(GatewayIntent.class))
+    DiscordGuildCommandRegistrar discordGuildCommandRegistrar(DiscordCommandCatalog commandCatalog) {
+        return new DiscordGuildCommandRegistrar(commandCatalog);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordGuildEventListener discordGuildEventListener(
+            GuildConnectionService guildConnectionService,
+            DiscordGuildCommandRegistrar commandRegistrar) {
+        return new DiscordGuildEventListener(guildConnectionService, commandRegistrar);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordSlashCommandListener discordSlashCommandListener(GuildStatusService statusService) {
+        return new DiscordSlashCommandListener(statusService);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordJdaFactory discordJdaFactory(
+            DiscordGuildEventListener guildEventListener,
+            DiscordSlashCommandListener slashCommandListener) {
+        return token -> JDABuilder.createLight(token, gatewayIntents())
                 .setAutoReconnect(true)
-                .addEventListeners(guildEventListener)
+                .addEventListeners(guildEventListener, slashCommandListener)
                 .build();
+    }
+
+    static EnumSet<GatewayIntent> gatewayIntents() {
+        return EnumSet.noneOf(GatewayIntent.class);
     }
 
     @Bean

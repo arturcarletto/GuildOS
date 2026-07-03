@@ -13,9 +13,13 @@ import io.github.arturcarletto.guildos.guild.GuildConnectionService;
 final class DiscordGuildEventListener extends ListenerAdapter {
 
     private final GuildConnectionService guildConnectionService;
+    private final DiscordGuildCommandRegistrar commandRegistrar;
 
-    DiscordGuildEventListener(GuildConnectionService guildConnectionService) {
+    DiscordGuildEventListener(
+            GuildConnectionService guildConnectionService,
+            DiscordGuildCommandRegistrar commandRegistrar) {
         this.guildConnectionService = guildConnectionService;
+        this.commandRegistrar = commandRegistrar;
     }
 
     @Override
@@ -35,5 +39,6 @@ final class DiscordGuildEventListener extends ListenerAdapter {
 
     private void connect(Guild guild) {
         guildConnectionService.connect(new ConnectGuildCommand(guild.getId(), guild.getName()));
+        commandRegistrar.reconcile(guild);
     }
 }

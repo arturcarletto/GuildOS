@@ -8,19 +8,25 @@ import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent;
 import net.dv8tion.jda.api.events.session.ReadyEvent;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import io.github.arturcarletto.guildos.guild.ConnectGuildCommand;
 import io.github.arturcarletto.guildos.guild.DisconnectGuildCommand;
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DiscordGuildEventListenerTest {
 
     private final GuildConnectionService service = mock(GuildConnectionService.class);
-    private final DiscordGuildEventListener listener = new DiscordGuildEventListener(service);
+    private final DiscordGuildCommandRegistrar commandRegistrar = mock(DiscordGuildCommandRegistrar.class);
+    private final DiscordGuildEventListener listener =
+            new DiscordGuildEventListener(service, commandRegistrar);
 
     @Test
     void readySynchronizesEveryCurrentlyConnectedGuild() {
@@ -35,6 +41,8 @@ class DiscordGuildEventListenerTest {
 
         verify(service).connect(new ConnectGuildCommand("2001", "First Guild"));
         verify(service).connect(new ConnectGuildCommand("2002", "Second Guild"));
+        verify(commandRegistrar).reconcile(firstGuild);
+        verify(commandRegistrar).reconcile(secondGuild);
     }
 
     @Test
@@ -44,7 +52,9 @@ class DiscordGuildEventListenerTest {
 
         listener.onGuildJoin(new GuildJoinEvent(jda, 1, guild));
 
-        verify(service).connect(new ConnectGuildCommand("2003", "Joined Guild"));
+        InOrder order = inOrder(service, commandRegistrar);
+        order.verify(service).connect(new ConnectGuildCommand("2003", "Joined Guild"));
+        order.verify(commandRegistrar).reconcile(guild);
     }
 
     @Test
@@ -55,6 +65,21 @@ class DiscordGuildEventListenerTest {
         listener.onGuildLeave(new GuildLeaveEvent(jda, 1, guild));
 
         verify(service).disconnect(new DisconnectGuildCommand("2004"));
+        verify(commandRegistrar, never()).reconcile(guild);
+    }
+
+    @Test
+    void registrationFailureDoesNotPreventGuildConnectionOrEscape() {
+        JDA jda = mock(JDA.class);
+        Guild guild = guild("2005", "Registration Failure Guild");
+        when(guild.updateCommands()).thenThrow(new IllegalStateException("sensitive upstream detail"));
+        DiscordGuildEventListener listenerWithRealRegistrar = new DiscordGuildEventListener(
+                service,
+                new DiscordGuildCommandRegistrar(new DiscordCommandCatalog()));
+
+        assertThatCode(() -> listenerWithRealRegistrar.onGuildJoin(new GuildJoinEvent(jda, 1, guild)))
+                .doesNotThrowAnyException();
+        verify(service).connect(new ConnectGuildCommand("2005", "Registration Failure Guild"));
     }
 
     private Guild guild(String id, String name) {
