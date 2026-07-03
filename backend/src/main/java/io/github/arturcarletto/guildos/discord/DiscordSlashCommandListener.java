@@ -101,7 +101,7 @@ final class DiscordSlashCommandListener extends ListenerAdapter {
 
     private void logFailure(String operation, String guildId, Throwable failure) {
         logger.warn(
-                "Discord slash command operation failed: command={}, subcommand={}, guildId={}, "
+                "Discord slash command operation failed: command={}, guildId={}, "
                         + "operation={}, failureCategory={}",
                 COMMAND_NAME,
                 guildId,
