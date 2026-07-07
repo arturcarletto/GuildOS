@@ -152,43 +152,78 @@ To verify locally:
 5. Install the bot in a second, non-onboarded guild and confirm the command returns the onboarding-required response.
 6. Restart Guild OS and confirm guild-scoped command reconciliation remains idempotent and the command still responds.
 
-Command limitations are deliberate: there is no real welcome delivery, moderation, message/member collection, analytics, scheduled automation, AI functionality, command localization, global command rollout, or frontend.
+Command limitations are deliberate: there is no moderation, message/member collection, analytics, scheduled automation, AI functionality, command localization, global command rollout, or frontend.
 
-## Manage welcome configuration from Discord
+## Welcome and goodbye messages from Discord
 
-The authoritative guild command catalog also registers `/welcome` with four subcommands:
+The authoritative guild command catalog registers two parallel, consistent commands — `/welcome` and `/goodbye` — each with the same four subcommands:
 
-- `/welcome status` reads the current configuration.
-- `/welcome configure channel:<channel> message:<template>` creates or updates the configuration and automatically enables it.
-- `/welcome preview` renders the saved template only in the invoking server manager's ephemeral command response; it sends nothing to the configured channel.
-- `/welcome disable` disables delivery while preserving the selected channel and template for later preview or re-enabling.
+- `/welcome status` / `/goodbye status` — show the current configuration as a polished ephemeral embed (channel, enabled state, title, message, footer, accent color, and whether an image, button, mention or bot inclusion is configured).
+- `/welcome configure` / `/goodbye configure` — create or update the configuration. The first configuration is enabled by default; editing an already-disabled configuration keeps it disabled.
+- `/welcome preview` / `/goodbye preview` — render the exact public message (embed, thumbnail, image, footer, timestamp and button) as an ephemeral response using the invoking member as the sample. Nothing is sent to the configured channel and nobody is notified.
+- `/welcome toggle` / `/goodbye toggle` — switch an existing configuration between enabled and disabled, preserving all channel and appearance values. It replaces the old `/welcome disable` subcommand and never creates a configuration; run `configure` first.
 
-Discord exposes `/welcome` to members with Manage Server by default, and Guild OS independently rechecks the invoking member's effective Manage Server permission on every interaction. Discord owner and administrator semantics are handled by JDA's effective permission check. The guild must also be currently connected and have at least one active Guild OS onboarding authorization. Discord command administration does not fabricate an operator identity or require the invoking member to have used browser OAuth.
+Both commands default to members with Manage Server, and Guild OS independently rechecks the invoking member's effective Manage Server permission on every interaction (a Manage Server user is not necessarily a Discord Administrator). The guild must be currently connected and have at least one active Guild OS onboarding authorization. All administrative responses are ephemeral embeds with every allowed mention disabled, and they never expose the internal optimistic-locking version, database identifiers, operator data, OAuth data, or tokens.
 
-The configure channel must be a standard guild text or announcement channel in the invoking guild. The bot must have effective View Channel and Send Messages permissions in that channel; Administrator permission is neither requested nor required. A deleted or newly inaccessible saved channel is reported safely by status and preview without deleting the persisted configuration.
+### Configure options
 
-Templates are normalized to LF line endings, trimmed only at their outer boundary, and limited to 1000 stored characters. They may be static or use these deterministic placeholders:
+`configure` requires `channel` and `message` (the embed description). Optional values are preserved when omitted on a later edit:
 
-- `{member}` — the invoking member's safe effective display name in preview;
-- `{server}` — the current safe guild name;
-- `{memberCount}` — the current JDA guild member count.
+- `title` — embed title.
+- `color` — accent color as a hex value like `#57F287` (Discord green) or `#ED4245` (Discord red).
+- `image` — banner image HTTPS URL.
+- `footer` — embed footer.
+- `include-bots` — also announce bot accounts (default off).
 
-Unknown placeholders, `@everyone`, `@here`, and raw Discord user, role, or channel mention syntax are rejected. Administrative replies disable all allowed mentions. Previewing a disabled configuration is supported and clearly labeled, but no public Discord message is sent.
+Welcome adds three welcome-only options: `mention-member` (ping the joining member), `button-label` and `button-url` (a single link button; both are required together). Goodbye never mentions the departing user and has no button.
 
-To verify the feature manually in a test guild:
+The configure channel must be a standard guild text or announcement channel in the invoking guild, and the bot must have View Channel, Send Messages and **Embed Links** in it; Administrator is never requested. A deleted or newly inaccessible saved channel is reported safely by status and preview without deleting the persisted configuration. Image and button URLs must be HTTPS; Guild OS never downloads or inspects them — Discord resolves them when rendering.
 
-1. Start PostgreSQL, enable the Discord Gateway, enable human Discord OAuth, and start Guild OS.
-2. Install the bot with the `bot` and `applications.commands` scopes, then grant it View Channel and Send Messages only in the intended test channel.
+### Template placeholders
+
+Titles, descriptions, footers and button labels may be static or use these deterministic, non-recursive placeholders:
+
+- `{member}` — safe display name;
+- `{username}` — safe Discord username;
+- `{server}` — safe guild name;
+- `{memberCount}` — current member count;
+- `{mention}` — a real mention of the member (welcome only; rejected in goodbye).
+
+Unknown placeholders, malformed braces, `@everyone`, `@here`, and raw Discord user, role or channel mention syntax are rejected. A welcome mention is generated by the adapter from the joining user's id and the message allows mentioning only that one user; goodbye messages mention nobody. Each field is validated at configuration time against worst-case rendered lengths so an accepted template always fits Discord's embed limits.
+
+### Real delivery, the GUILD_MEMBERS intent, and neutral goodbye wording
+
+On a real member join, Guild OS delivers the welcome embed; on a member removal, it delivers the goodbye embed. This requires the privileged **`GUILD_MEMBERS`** Gateway intent, which Guild OS enables automatically when the Discord integration is enabled. You must also enable **Server Members Intent** for the application in the Discord Developer Portal (Bot → Privileged Gateway Intents). No other optional or privileged intent (message content, presence) is requested.
+
+The member removal event covers voluntary leaves, kicks and bans alike, so goodbye copy uses neutral wording (for example "A member has left" / "{member} is no longer in {server}") and never claims the member left voluntarily. Guild OS does not read the audit log or request View Audit Log.
+
+Delivery reads the active configuration, then sends asynchronously entirely outside any database transaction. If the channel is missing or the bot lacks View Channel, Send Messages or Embed Links, delivery is skipped safely without disabling or deleting the configuration and without any database write. Delivery failures never crash the Gateway listener and never log message content, templates or URLs. Outcomes are recorded on a bounded Micrometer counter `guildos.discord.member_message.delivery` tagged only by `kind` (`welcome`/`goodbye`) and `outcome` (`sent`, `disabled`, `not_configured`, `bot_ignored`, `channel_unavailable`, `permission_denied`, `send_failed`); no guild, channel or user identifiers are used as metric tags.
+
+Install the bot with the `bot` and `applications.commands` scopes, granting it View Channel, Send Messages and Embed Links in the intended channels:
+
+```text
+https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot%20applications.commands
+```
+
+### Verify the feature manually in a test guild
+
+1. Start PostgreSQL, enable the Discord Gateway and human Discord OAuth, and enable **Server Members Intent** in the Discord Developer Portal, then start Guild OS.
+2. Install the bot with the `bot` and `applications.commands` scopes and grant it View Channel, Send Messages and Embed Links in the test channels.
 3. Complete browser OAuth onboarding for the connected test guild.
-4. Confirm command reconciliation exposes `/status` plus `/welcome status`, `/welcome configure`, `/welcome preview`, and `/welcome disable`.
-5. As a member without Manage Server, confirm welcome administration is unavailable or denied; then repeat as a member with Manage Server.
-6. Configure `#welcome` with `Welcome {member} to {server}! You are member #{memberCount}.` and confirm the response is ephemeral.
-7. Run status and preview, confirm the rendered values, and confirm no message appears in `#welcome`.
-8. Disable the configuration, confirm status remains persisted, and confirm preview still works with a disabled warning.
-9. Remove the bot's Send Messages permission and confirm a new configure attempt is rejected. Delete the configured channel and confirm status/preview report it as unavailable without deleting the row.
-10. Restart Guild OS and confirm the configuration persists.
+4. Confirm command reconciliation exposes `/status`, `/welcome` (`status`, `configure`, `preview`, `toggle`) and `/goodbye` (`status`, `configure`, `preview`, `toggle`), and that `/welcome disable` no longer exists.
+5. Configure welcome, for example:
 
-This milestone intentionally does not handle `GuildMemberJoinEvent` or deliver welcome messages. No Guild Members privileged intent—or any other optional Gateway intent—is enabled. Member-join delivery and its intent assessment belong to GUILD-009.
+   ```text
+   /welcome configure channel:#welcome message:Hey **{member}**, welcome to **{server}**! You are member **#{memberCount}**.
+     title:Welcome to {server}! color:#57F287 footer:Welcome • {server}
+     mention-member:true button-label:Read the rules button-url:https://example.com/rules
+   ```
+
+6. Run `/welcome preview` and confirm the complete ephemeral embed and button, then `/welcome status` and confirm no internal version is shown. Run `/welcome toggle` twice and confirm the state flips correctly.
+7. Join with a test account and confirm exactly one polished welcome message appears in `#welcome`.
+8. Configure goodbye (`/goodbye configure channel:#goodbye message:We’re saying goodbye to **{member}**. …`), run `/goodbye preview`, remove the test account, and confirm one neutral goodbye embed appears.
+9. Remove the bot's Embed Links permission and confirm delivery is skipped safely; delete a configured channel and confirm status warns without deleting the persisted row.
+10. Restart Guild OS and confirm both configurations persist.
 
 ## Authenticate operators with Discord OAuth2
 

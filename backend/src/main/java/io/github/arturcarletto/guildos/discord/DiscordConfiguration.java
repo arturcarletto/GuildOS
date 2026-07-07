@@ -1,7 +1,9 @@
 package io.github.arturcarletto.guildos.discord;
 
+import java.time.Clock;
 import java.util.EnumSet;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -10,8 +12,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
+import io.github.arturcarletto.guildos.guildmembermessage.GuildMemberMessageService;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
-import io.github.arturcarletto.guildos.guildwelcome.GuildWelcomeService;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(DiscordProperties.class)
@@ -45,9 +47,43 @@ class DiscordConfiguration {
 
     @Bean
     @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
-    DiscordWelcomeCommandListener discordWelcomeCommandListener(
-            GuildWelcomeService welcomeService) {
-        return new DiscordWelcomeCommandListener(welcomeService);
+    DiscordMemberMessageEmbedFactory discordMemberMessageEmbedFactory() {
+        return new DiscordMemberMessageEmbedFactory();
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordMemberMessageChannelResolver discordMemberMessageChannelResolver() {
+        return new DiscordMemberMessageChannelResolver();
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordMemberMessageDeliveryMetrics discordMemberMessageDeliveryMetrics(MeterRegistry registry) {
+        return new DiscordMemberMessageDeliveryMetrics(registry);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordMemberMessageCommandListener discordMemberMessageCommandListener(
+            GuildMemberMessageService memberMessageService,
+            DiscordMemberMessageEmbedFactory embedFactory,
+            DiscordMemberMessageChannelResolver channelResolver,
+            Clock clock) {
+        return new DiscordMemberMessageCommandListener(
+                memberMessageService, embedFactory, channelResolver, clock);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordMemberLifecycleListener discordMemberLifecycleListener(
+            GuildMemberMessageService memberMessageService,
+            DiscordMemberMessageEmbedFactory embedFactory,
+            DiscordMemberMessageChannelResolver channelResolver,
+            DiscordMemberMessageDeliveryMetrics deliveryMetrics,
+            Clock clock) {
+        return new DiscordMemberLifecycleListener(
+                memberMessageService, embedFactory, channelResolver, deliveryMetrics, clock);
     }
 
     @Bean
@@ -55,15 +91,21 @@ class DiscordConfiguration {
     DiscordJdaFactory discordJdaFactory(
             DiscordGuildEventListener guildEventListener,
             DiscordSlashCommandListener slashCommandListener,
-            DiscordWelcomeCommandListener welcomeCommandListener) {
+            DiscordMemberMessageCommandListener memberMessageCommandListener,
+            DiscordMemberLifecycleListener memberLifecycleListener) {
         return token -> JDABuilder.createLight(token, gatewayIntents())
                 .setAutoReconnect(true)
-                .addEventListeners(guildEventListener, slashCommandListener, welcomeCommandListener)
+                .addEventListeners(
+                        guildEventListener,
+                        slashCommandListener,
+                        memberMessageCommandListener,
+                        memberLifecycleListener)
                 .build();
     }
 
     static EnumSet<GatewayIntent> gatewayIntents() {
-        return EnumSet.noneOf(GatewayIntent.class);
+        // GUILD_MEMBERS (a privileged intent) is required to receive member join and remove events.
+        return EnumSet.of(GatewayIntent.GUILD_MEMBERS);
     }
 
     @Bean
