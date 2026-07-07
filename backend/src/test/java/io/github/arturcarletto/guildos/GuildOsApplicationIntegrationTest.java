@@ -91,11 +91,21 @@ class GuildOsApplicationIntegrationTest {
                             FROM information_schema.tables
                             WHERE table_schema = 'guild_os' AND table_name = 'guild_settings'
                         )
+                """,
+                Boolean.class);
+        Boolean guildWelcomeConfigurationsTableExists = jdbcTemplate.queryForObject(
+                """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = 'guild_os'
+                              AND table_name = 'guild_welcome_configurations'
+                        )
                         """,
                 Boolean.class);
         Integer successfulMigrations = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM guild_os.flyway_schema_history "
-                        + "WHERE version IN ('1', '2', '3', '4', '5') AND success",
+                        + "WHERE version IN ('1', '2', '3', '4', '5', '6') AND success",
                 Integer.class);
         String guildSettingsDeleteRule = jdbcTemplate.queryForObject(
                 """
@@ -103,6 +113,14 @@ class GuildOsApplicationIntegrationTest {
                         FROM information_schema.referential_constraints
                         WHERE constraint_schema = 'guild_os'
                           AND constraint_name = 'guild_settings_registered_guild_fk'
+                """,
+                String.class);
+        String guildWelcomeDeleteRule = jdbcTemplate.queryForObject(
+                """
+                        SELECT delete_rule
+                        FROM information_schema.referential_constraints
+                        WHERE constraint_schema = 'guild_os'
+                          AND constraint_name = 'guild_welcome_configurations_registered_guild_fk'
                         """,
                 String.class);
         String disconnectedAtType = jdbcTemplate.queryForObject(
@@ -120,8 +138,10 @@ class GuildOsApplicationIntegrationTest {
         assertThat(operatorAccountsTableExists).isTrue();
         assertThat(operatorGuildAccessTableExists).isTrue();
         assertThat(guildSettingsTableExists).isTrue();
-        assertThat(successfulMigrations).isEqualTo(5);
+        assertThat(guildWelcomeConfigurationsTableExists).isTrue();
+        assertThat(successfulMigrations).isEqualTo(6);
         assertThat(guildSettingsDeleteRule).isEqualTo("NO ACTION");
+        assertThat(guildWelcomeDeleteRule).isEqualTo("NO ACTION");
         assertThat(disconnectedAtType).isEqualTo("timestamp with time zone");
         assertThat(applicationContext.containsBean("discordGateway")).isFalse();
         assertThat(applicationContext.getBeansOfType(ClientRegistrationRepository.class)).isEmpty();
