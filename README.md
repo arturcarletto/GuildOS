@@ -46,47 +46,47 @@ GuildOS/
 
 - JDK 21 available on `PATH`
 - Docker Desktop with Docker Compose enabled
-- PowerShell 7 or Windows PowerShell 5.1
+- Bash-compatible shell, such as Linux, macOS, WSL, or Git Bash
 
 Maven does not need to be installed; the repository includes the Maven Wrapper.
 
-## Start locally on Windows PowerShell
+## Start locally with Bash
 
 From the repository root, optionally create a local Compose environment file:
 
-```powershell
-Copy-Item .env.example .env
+```bash
+cp .env.example .env
 ```
 
 The committed values are non-sensitive local-development defaults. Change the values in `.env` if they conflict with your environment. The root `.env` file is read by Docker Compose only; a Spring Boot process started directly uses the `local` profile and variables from its shell environment.
 
 Start PostgreSQL and wait until its health status is `healthy`:
 
-```powershell
+```bash
 docker compose up -d postgres
 docker compose ps
 ```
 
 Run the backend with the `local` profile:
 
-```powershell
-Set-Location backend
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=local"
+```bash
+cd backend
+sh ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
 The local profile connects to `jdbc:postgresql://localhost:5432/guildos` with the documented local-only `guildos_app` / `guildos_local` credentials. `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` can override them.
 
-In another PowerShell window, verify application health:
+In another terminal, verify application health:
 
-```powershell
-Invoke-RestMethod http://localhost:8080/actuator/health
+```bash
+curl http://localhost:8080/actuator/health
 ```
 
 The response should report `status` as `UP`. Actuator exposes only `health` and `info`, and health details are not public.
 
 Stop local infrastructure from the repository root:
 
-```powershell
+```bash
 docker compose down
 ```
 
@@ -94,39 +94,39 @@ Add `-v` only when you intentionally want to delete the local PostgreSQL volume.
 
 ## Connect to the Discord Gateway
 
-The Discord Gateway integration is disabled by default, so the backend starts without a Discord token. To enable it temporarily, create a bot in the Discord Developer Portal, install it in a test server, and set these variables in the PowerShell session that will start Spring Boot:
+The Discord Gateway integration is disabled by default, so the backend starts without a Discord token. To enable it temporarily, create a bot in the Discord Developer Portal, install it in a test server, and set these variables in the shell session that will start Spring Boot:
 
-```powershell
-$env:GUILDOS_DISCORD_ENABLED = "true"
-$env:DISCORD_BOT_TOKEN = "your-local-token"
+```bash
+export GUILDOS_DISCORD_ENABLED=true
+export DISCORD_BOT_TOKEN=your-local-token
 ```
 
 Never commit or share a Discord bot token. Do not put a real token in `.env.example` or another tracked file.
 
 With PostgreSQL running, start the application from the repository root:
 
-```powershell
-Set-Location backend
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=local"
+```bash
+cd backend
+sh ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
 Startup waits until JDA reports the initial Gateway connection as ready. The integration then synchronizes the guilds currently available to JDA into PostgreSQL. Guild join events create or reconnect registry entries, and guild leave events mark entries disconnected without deleting their history.
 
 The integration uses no optional Gateway intents and does not require Message Content, Guild Members, or Guild Presences. Guild onboarding, operator authorization, and persistent timezone/locale settings are available through the authenticated APIs described below. Operator authentication is provided separately through Discord OAuth2.
 
-Check the existing Actuator health endpoint from another PowerShell window:
+Check the existing Actuator health endpoint from another terminal:
 
-```powershell
-Invoke-RestMethod http://localhost:8080/actuator/health
+```bash
+curl http://localhost:8080/actuator/health
 ```
 
 When enabled, the `discord` health contributor is `UP` only while JDA is connected. The current safe health policy exposes the aggregate status but does not expose component details publicly.
 
-After stopping the application, remove the credentials from the current PowerShell session:
+After stopping the application, remove the credentials from the current shell session:
 
-```powershell
-Remove-Item Env:GUILDOS_DISCORD_ENABLED
-Remove-Item Env:DISCORD_BOT_TOKEN
+```bash
+unset GUILDOS_DISCORD_ENABLED
+unset DISCORD_BOT_TOKEN
 ```
 
 ## Use the Discord status command
@@ -162,13 +162,13 @@ Human operator login is separate from the JDA bot connection and is disabled by 
 http://localhost:8080/login/oauth2/code/discord
 ```
 
-Set the OAuth client credentials only in the PowerShell session that starts Spring Boot:
+Set the OAuth client credentials only in the shell session that starts Spring Boot:
 
-```powershell
-$env:GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED = "true"
-$env:DISCORD_OAUTH_CLIENT_ID = "your-client-id"
-$env:DISCORD_OAUTH_CLIENT_SECRET = "your-client-secret"
-$env:DISCORD_OAUTH_REDIRECT_URI = "http://localhost:8080/login/oauth2/code/discord"
+```bash
+export GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED=true
+export DISCORD_OAUTH_CLIENT_ID=your-client-id
+export DISCORD_OAUTH_CLIENT_SECRET=your-client-secret
+export DISCORD_OAUTH_REDIRECT_URI=http://localhost:8080/login/oauth2/code/discord
 ```
 
 Never commit or share the client secret. With PostgreSQL running, start the backend with the local profile as described above, then open this explicit login entry point in a browser:
@@ -181,13 +181,13 @@ After Discord authentication, the backend redirects to `GET /api/v1/me`. That pr
 
 Spring Security uses a server-side HTTP session. Logout uses `POST /logout` and requires the active CSRF token; successful logout returns HTTP 204. The current in-memory, single-instance session strategy must be revisited before horizontal scaling rather than adding distributed session storage prematurely.
 
-After local testing, remove the OAuth variables from the current PowerShell session:
+After local testing, remove the OAuth variables from the current shell session:
 
-```powershell
-Remove-Item Env:GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED
-Remove-Item Env:DISCORD_OAUTH_CLIENT_ID
-Remove-Item Env:DISCORD_OAUTH_CLIENT_SECRET
-Remove-Item Env:DISCORD_OAUTH_REDIRECT_URI
+```bash
+unset GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED
+unset DISCORD_OAUTH_CLIENT_ID
+unset DISCORD_OAUTH_CLIENT_SECRET
+unset DISCORD_OAUTH_REDIRECT_URI
 ```
 
 ## Onboard guilds and authorize operators
@@ -277,10 +277,10 @@ Send the returned `token` on each state-changing request using the returned `hea
 
 The integration test starts its own PostgreSQL container, runs Flyway, loads the Spring application context, and checks the resulting schema. Docker Desktop must be running.
 
-```powershell
-Set-Location backend
-.\mvnw.cmd test
-.\mvnw.cmd verify
+```bash
+cd backend
+sh ./mvnw test
+sh ./mvnw verify
 ```
 
 CI runs the same Maven `verify` lifecycle on pushes to `main` and pull requests targeting `main`.
