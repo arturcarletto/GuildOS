@@ -98,3 +98,54 @@ export interface ActivityAnalytics {
   summary: ActivitySummary;
   buckets: ActivityBucket[];
 }
+
+/** Which member lifecycle message a configuration targets. */
+export type MemberMessageKind = 'welcome' | 'goodbye';
+
+/**
+ * `GET|PUT|POST toggle` response for a welcome/goodbye configuration. Welcome-only fields
+ * (`mentionMember`, `buttonLabel`, `buttonUrl`) are `null` for goodbye or when unconfigured.
+ */
+export interface MemberMessageConfig {
+  kind: 'WELCOME' | 'GOODBYE' | string;
+  configured: boolean;
+  enabled: boolean;
+  channelId: string;
+  title: string;
+  message: string;
+  color: string;
+  imageUrl: string;
+  footer: string;
+  includeBots: boolean;
+  mentionMember: boolean | null;
+  buttonLabel: string;
+  buttonUrl: string;
+}
+
+/** Body for `PUT` / `POST .../preview` on a member-message configuration. */
+export interface UpdateMemberMessageRequest {
+  channelId: string;
+  message: string;
+  title?: string;
+  color?: string;
+  imageUrl?: string;
+  footer?: string;
+  includeBots?: boolean;
+  mentionMember?: boolean;
+  buttonLabel?: string;
+  buttonUrl?: string;
+}
+
+/** `POST .../preview` rendered result. Never sent to Discord. */
+export interface MemberMessagePreview {
+  kind: 'WELCOME' | 'GOODBYE' | string;
+  title: string;
+  description: string;
+  color: string;
+  imageUrl: string | null;
+  footer: string;
+  memberCount: number;
+  mentionMember: boolean;
+  buttonLabel: string | null;
+  buttonUrl: string | null;
+}

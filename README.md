@@ -503,6 +503,20 @@ npm run lint       # run ESLint
 
 Frontend CI (`.github/workflows/frontend-ci.yml`) runs `npm ci`, `npm run lint`, `npm run test`, and `npm run build` on Node 22 for pull requests targeting `main` and pushes to `main`, independently of the backend CI workflow.
 
+### Manage welcome/goodbye automation from the dashboard
+
+The guild detail page has an **Automation** tab (between Settings and Activity) where an authorized operator can manage the welcome and goodbye messages for a guild without using Discord slash commands. Each message has a card to:
+
+- view the current configuration and its enabled/disabled state;
+- edit the channel, title, message, accent color, image URL, footer, and "include bots" option (welcome adds mention-member and a link button);
+- **Save** to create or update the configuration;
+- **Preview** a rendered sample of the message; and
+- **Enable / Disable** an existing configuration (toggle never creates one).
+
+The dashboard and the `/welcome` and `/goodbye` slash commands share the same backend service, so both remain fully supported and apply exactly the same validation and safety rules: unknown placeholders and unsafe mentions (`@everyone`, `@here`, raw user/role/channel mentions) are rejected, `{mention}` is rejected for goodbye, image and button URLs must be HTTPS, a button needs both a label and a URL, the color must be a hex value, and Discord embed limits are enforced. Automation is authorized through the same operator-to-guild boundary as guild settings — an operator can only manage automation for guilds where they hold an active `OWNER`/`ADMIN` GuildOS authorization — and every state-changing request requires the CSRF token.
+
+The dashboard **preview never sends a message to Discord**: it renders deterministic sample values (a sample member, username, member count, and the guild's name) and returns them for display only. For now the dashboard uses the raw Discord **channel ID** (enable Developer Mode in Discord and use "Copy Channel ID"); a friendlier channel picker awaits channel-metadata sync. As with the slash commands, delivery still skips safely if the saved channel later becomes unavailable or the bot loses permission, without deleting the configuration.
+
 ## Experimental Telegram adapter (proof of concept)
 
 Guild OS is evolving from a Discord-first backend into a multi-platform community-management core with pluggable platform adapters. A small `io.github.arturcarletto.guildos.platform` package holds adapter-neutral abstractions (`CommunityPlatform`, the platform-scoped ids, `IncomingCommunityEvent`, `PlatformBotCommand`, `PlatformMessageSender`), and the Discord integration is the first complete adapter. The `io.github.arturcarletto.guildos.telegram` package adds a **minimal, experimental Telegram adapter** as a second-platform proof of concept.

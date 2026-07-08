@@ -14,6 +14,7 @@
 
 import {
   asArray,
+  asBoolean,
   asNumber,
   asRequiredString,
   asString,
@@ -28,7 +29,11 @@ import type {
   CurrentOperator,
   EligibleGuild,
   GuildSettings,
+  MemberMessageConfig,
+  MemberMessageKind,
+  MemberMessagePreview,
   UpdateGuildSettingsRequest,
+  UpdateMemberMessageRequest,
 } from './types';
 
 export class ApiError extends Error {
@@ -270,6 +275,45 @@ function parseActivityAnalytics(value: unknown): ActivityAnalytics {
   };
 }
 
+function parseMemberMessageConfig(value: unknown): MemberMessageConfig {
+  const source = isRecord(value) ? value : {};
+  return {
+    kind: asRequiredString(source.kind, 'WELCOME'),
+    configured: asBoolean(source.configured),
+    enabled: asBoolean(source.enabled),
+    channelId: asRequiredString(source.channelId),
+    title: asRequiredString(source.title),
+    message: asRequiredString(source.message),
+    color: asRequiredString(source.color),
+    imageUrl: asRequiredString(source.imageUrl),
+    footer: asRequiredString(source.footer),
+    includeBots: asBoolean(source.includeBots),
+    mentionMember: typeof source.mentionMember === 'boolean' ? source.mentionMember : null,
+    buttonLabel: asRequiredString(source.buttonLabel),
+    buttonUrl: asRequiredString(source.buttonUrl),
+  };
+}
+
+function parseMemberMessagePreview(value: unknown): MemberMessagePreview {
+  const source = isRecord(value) ? value : {};
+  return {
+    kind: asRequiredString(source.kind, 'WELCOME'),
+    title: asRequiredString(source.title),
+    description: asRequiredString(source.description),
+    color: asRequiredString(source.color),
+    imageUrl: asString(source.imageUrl),
+    footer: asRequiredString(source.footer),
+    memberCount: asNumber(source.memberCount),
+    mentionMember: asBoolean(source.mentionMember),
+    buttonLabel: asString(source.buttonLabel),
+    buttonUrl: asString(source.buttonUrl),
+  };
+}
+
+function memberMessageUrl(discordGuildId: string, kind: MemberMessageKind): string {
+  return `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/member-messages/${kind}`;
+}
+
 // ---------------------------------------------------------------------------
 // Public API surface.
 // ---------------------------------------------------------------------------
@@ -331,6 +375,50 @@ export const api = {
     return getJson(
       `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/analytics/activity?${query.toString()}`,
       parseActivityAnalytics,
+    );
+  },
+
+  getMemberMessageConfig(
+    discordGuildId: string,
+    kind: MemberMessageKind,
+  ): Promise<MemberMessageConfig> {
+    return getJson(memberMessageUrl(discordGuildId, kind), parseMemberMessageConfig);
+  },
+
+  updateMemberMessageConfig(
+    discordGuildId: string,
+    kind: MemberMessageKind,
+    request: UpdateMemberMessageRequest,
+  ): Promise<MemberMessageConfig> {
+    return sendStateChanging(
+      'PUT',
+      memberMessageUrl(discordGuildId, kind),
+      parseMemberMessageConfig,
+      request,
+    );
+  },
+
+  toggleMemberMessageConfig(
+    discordGuildId: string,
+    kind: MemberMessageKind,
+  ): Promise<MemberMessageConfig> {
+    return sendStateChanging(
+      'POST',
+      `${memberMessageUrl(discordGuildId, kind)}/toggle`,
+      parseMemberMessageConfig,
+    );
+  },
+
+  previewMemberMessageConfig(
+    discordGuildId: string,
+    kind: MemberMessageKind,
+    request: UpdateMemberMessageRequest,
+  ): Promise<MemberMessagePreview> {
+    return sendStateChanging(
+      'POST',
+      `${memberMessageUrl(discordGuildId, kind)}/preview`,
+      parseMemberMessagePreview,
+      request,
     );
   },
 
