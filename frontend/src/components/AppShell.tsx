@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthContext';
 import { initials } from './format';
@@ -69,9 +69,10 @@ export default function AppShell() {
     return <LoadingState label="Checking your session…" />;
   }
 
+  // Redirect declaratively instead of calling navigate() during render, which would trigger a
+  // state update on the Router mid-render. <Navigate> performs the redirect as a routing effect.
   if (status === 'unauthenticated') {
-    navigate('/', { replace: true });
-    return null;
+    return <Navigate to="/" replace />;
   }
 
   const handleSignOut = async () => {
