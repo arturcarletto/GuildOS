@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
+import io.github.arturcarletto.guildos.guildactivity.GuildActivityIngestionService;
 import io.github.arturcarletto.guildos.guildmembermessage.GuildMemberMessageService;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
 
@@ -24,6 +25,7 @@ class DiscordConfigurationTest {
             .withBean(GuildConnectionService.class, () -> mock(GuildConnectionService.class))
             .withBean(GuildStatusService.class, () -> mock(GuildStatusService.class))
             .withBean(GuildMemberMessageService.class, () -> mock(GuildMemberMessageService.class))
+            .withBean(GuildActivityIngestionService.class, () -> mock(GuildActivityIngestionService.class))
             .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
             .withBean(Clock.class, Clock::systemUTC);
 
@@ -40,6 +42,7 @@ class DiscordConfigurationTest {
                     assertThat(context).doesNotHaveBean(DiscordSlashCommandListener.class);
                     assertThat(context).doesNotHaveBean(DiscordMemberMessageCommandListener.class);
                     assertThat(context).doesNotHaveBean(DiscordMemberLifecycleListener.class);
+                    assertThat(context).doesNotHaveBean(DiscordGuildActivityListener.class);
                     assertThat(context).doesNotHaveBean(DiscordGuildCommandRegistrar.class);
                     assertThat(context).doesNotHaveBean(DiscordCommandCatalog.class);
                 });
@@ -59,6 +62,7 @@ class DiscordConfigurationTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(DiscordMemberMessageCommandListener.class);
                     assertThat(context).hasSingleBean(DiscordMemberLifecycleListener.class);
+                    assertThat(context).hasSingleBean(DiscordGuildActivityListener.class);
                     assertThat(context).hasSingleBean(DiscordMemberMessageEmbedFactory.class);
                     assertThat(context).hasSingleBean(DiscordMemberMessageChannelResolver.class);
                     assertThat(context).hasSingleBean(DiscordMemberMessageDeliveryMetrics.class);
@@ -89,8 +93,9 @@ class DiscordConfigurationTest {
     }
 
     @Test
-    void gatewayEnablesOnlyTheGuildMembersPrivilegedIntent() {
+    void gatewayEnablesOnlyMembersAndMessagesWithoutMessageContent() {
         assertThat(DiscordConfiguration.gatewayIntents())
-                .containsExactly(GatewayIntent.GUILD_MEMBERS);
+                .containsExactlyInAnyOrder(GatewayIntent.GUILD_MEMBERS, GatewayIntent.GUILD_MESSAGES)
+                .doesNotContain(GatewayIntent.MESSAGE_CONTENT);
     }
 }

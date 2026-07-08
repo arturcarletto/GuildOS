@@ -1,10 +1,10 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, the guild-scoped `/status` command, and Discord administration of persistent welcome configuration and ephemeral previews.
+Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, the guild-scoped `/status` command, Discord administration and delivery of welcome/goodbye messages, durable Discord activity ingestion, and authorized hourly activity analytics.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, an ephemeral read-only Discord status command, and persistent welcome configuration with ephemeral administration and preview commands. Bot Gateway and human OAuth integrations are independently disabled by default. Welcome delivery, message and member event collection, moderation rules, broader guild management, community analytics, automation, AI features, and a frontend are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, and an authorized hourly analytics API. Bot Gateway and human OAuth integrations are independently disabled by default. Moderation rules, broader guild management, real-time dashboards, retention automation, AI features, and a frontend are not implemented yet.
 
 ## Technology stack
 
@@ -112,7 +112,7 @@ sh ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 
 Startup waits until JDA reports the initial Gateway connection as ready. The integration then synchronizes the guilds currently available to JDA into PostgreSQL. Guild join events create or reconnect registry entries, and guild leave events mark entries disconnected without deleting their history.
 
-The integration uses no optional Gateway intents and does not require Message Content, Guild Members, or Guild Presences. Guild onboarding, operator authorization, and persistent timezone/locale settings are available through the authenticated APIs described below. Operator authentication is provided separately through Discord OAuth2.
+The integration enables exactly two Gateway intents: privileged `GUILD_MEMBERS` for member lifecycle messages and member activity, and standard `GUILD_MESSAGES` for message activity metadata. It never enables `MESSAGE_CONTENT` and does not request presences. Guild onboarding, operator authorization, persistent timezone/locale settings, and authorized analytics are available through the authenticated APIs described below. Operator authentication is provided separately through Discord OAuth2.
 
 Check the existing Actuator health endpoint from another terminal:
 
@@ -152,7 +152,7 @@ To verify locally:
 5. Install the bot in a second, non-onboarded guild and confirm the command returns the onboarding-required response.
 6. Restart Guild OS and confirm guild-scoped command reconciliation remains idempotent and the command still responds.
 
-Command limitations are deliberate: there is no moderation, message/member collection, analytics, scheduled automation, AI functionality, command localization, global command rollout, or frontend.
+Command limitations are deliberate: `/status` is not a moderation, automation, dashboard, AI, localization, global command rollout, or frontend feature.
 
 ## Welcome and goodbye messages from Discord
 
@@ -193,7 +193,7 @@ Unknown placeholders, malformed braces, `@everyone`, `@here`, and raw Discord us
 
 ### Real delivery, the GUILD_MEMBERS intent, and neutral goodbye wording
 
-On a real member join, Guild OS delivers the welcome embed; on a member removal, it delivers the goodbye embed. This requires the privileged **`GUILD_MEMBERS`** Gateway intent, which Guild OS enables automatically when the Discord integration is enabled. You must also enable **Server Members Intent** for the application in the Discord Developer Portal (Bot → Privileged Gateway Intents). No other optional or privileged intent (message content, presence) is requested.
+On a real member join, Guild OS delivers the welcome embed; on a member removal, it delivers the goodbye embed. This requires the privileged **`GUILD_MEMBERS`** Gateway intent, which Guild OS enables automatically when the Discord integration is enabled. You must also enable **Server Members Intent** for the application in the Discord Developer Portal (Bot -> Privileged Gateway Intents). `GUILD_MESSAGES` is also enabled for activity metadata, but `MESSAGE_CONTENT` and presence are never requested.
 
 The member removal event covers voluntary leaves, kicks and bans alike, so goodbye copy uses neutral wording (for example "A member has left" / "{member} is no longer in {server}") and never claims the member left voluntarily. Guild OS does not read the audit log or request View Audit Log.
 
@@ -224,6 +224,82 @@ https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot%20appl
 8. Configure goodbye (`/goodbye configure channel:#goodbye message:We’re saying goodbye to **{member}**. …`), run `/goodbye preview`, remove the test account, and confirm one neutral goodbye embed appears.
 9. Remove the bot's Embed Links permission and confirm delivery is skipped safely; delete a configured channel and confirm status warns without deleting the persisted row.
 10. Restart Guild OS and confirm both configurations persist.
+
+## Durable activity ingestion and hourly analytics
+
+Guild OS records privacy-conscious Discord activity metadata for registered guilds that currently have at least one active Guild OS onboarding authorization. Unknown guilds, non-onboarded guilds, direct messages, and unsupported contexts are ignored safely and do not create inbox rows. Historical analytics remain readable while the bot is disconnected as long as the authenticated operator still has active Guild OS authorization for the guild.
+
+The Discord adapter listens for member joins, member removals, message creates, message edits, message deletes, and bulk message deletes. Bulk deletes are represented as one `MESSAGE_DELETED` event per deleted message id. The adapter translates JDA events into platform-neutral commands owned by `guildactivity`; no JDA event, channel, member, user, or message type crosses into that package.
+
+The stored metadata is limited to:
+
+- source event id;
+- event type;
+- internal registered guild id;
+- subject Discord id (member id or message id);
+- channel id for message events;
+- actor user id and bot flag only when Discord safely provides a normal actor;
+- occurrence time, receive time, schema version, processing state, retry counters, and bounded failure category.
+
+Guild OS never reads, stores, hashes, serializes, logs, or exposes message text, embed content, attachment names or URLs, component custom ids, sticker names, poll answers, usernames, display names, guild names, or channel names as activity payload data. The `guild_activity_events` table has no JSON, TEXT, BYTEA, content, or payload column. Metrics use only bounded low-cardinality tags such as event type and outcome; no guild, channel, message, user, URL, or exception message is used as a metric tag.
+
+PostgreSQL is the durable queue for this stage. Gateway callbacks perform one short transactional insert into `guild_os.guild_activity_events` using `INSERT ... ON CONFLICT (source_event_id) DO NOTHING`, so duplicate source events are successful no-ops. A scheduled processor claims bounded batches with `FOR UPDATE SKIP LOCKED`, marks rows `PROCESSING`, increments `attempt_count`, and then processes each row in its own transaction. Projection updates and marking an inbox row `PROCESSED` commit atomically. Failures roll back the projection transaction, then a separate short transaction stores only a bounded failure category and either reschedules the row with capped exponential backoff or marks it `DEAD` after the maximum attempts. Stale `PROCESSING` locks are reclaimable, so a worker crash does not permanently block the row.
+
+Hourly analytics are stored in UTC in `guild_os.guild_activity_hourly`. Counters include created messages, distinct edited messages, deleted messages, member joins, member leaves, human messages, bot messages, active members, and active channels. Companion uniqueness tables keep hourly active member/channel counts idempotent under retries and concurrent workers. This is at-least-once processing with idempotent projection; it is not claimed to be exactly once. Member-left source ids are best-effort deduplicated from the captured event time plus guild/user ids because Discord does not provide a native leave event id.
+
+Read activity analytics with an authenticated session:
+
+```text
+GET /api/v1/guilds/{discordGuildId}/analytics/activity?from=2026-07-03T00:00:00Z&to=2026-07-04T00:00:00Z
+```
+
+`from` is inclusive, `to` is exclusive, and both must be ISO-8601 instants. The maximum range is 31 days. Missing guilds, missing access, and revoked access all return the same non-enumerating JSON `404`. A valid request with no data returns zero summary values and an empty bucket array. Responses never expose internal guild UUIDs, inbox event ids, processing status, retry/failure details, raw user/channel/message ids, operator data, OAuth data, sessions, or tokens.
+
+Example response shape:
+
+```json
+{
+  "guildId": "100000000000000123",
+  "from": "2026-07-03T00:00:00Z",
+  "to": "2026-07-04T00:00:00Z",
+  "bucketTimezone": "UTC",
+  "summary": {
+    "messagesCreated": 0,
+    "distinctMessagesEdited": 0,
+    "messagesDeleted": 0,
+    "humanMessages": 0,
+    "botMessages": 0,
+    "membersJoined": 0,
+    "membersLeft": 0,
+    "peakHourlyActiveMembers": 0,
+    "peakHourlyActiveChannels": 0
+  },
+  "buckets": []
+}
+```
+
+Activity processor configuration uses bounded, non-secret properties:
+
+```bash
+export GUILDOS_ACTIVITY_PROCESSING_ENABLED=true
+export GUILDOS_ACTIVITY_PROCESSING_FIXED_DELAY_MS=10000
+export GUILDOS_ACTIVITY_PROCESSING_BATCH_SIZE=100
+export GUILDOS_ACTIVITY_PROCESSING_MAX_ATTEMPTS=5
+export GUILDOS_ACTIVITY_PROCESSING_INITIAL_RETRY_DELAY_MS=1000
+export GUILDOS_ACTIVITY_PROCESSING_MAX_RETRY_DELAY_MS=60000
+export GUILDOS_ACTIVITY_PROCESSING_STALE_LOCK_TIMEOUT_MS=300000
+```
+
+Manual verification in a test guild:
+
+1. Start PostgreSQL, enable Discord Gateway and human OAuth, enable **Server Members Intent**, and start Guild OS.
+2. Install the bot in a test guild and complete browser onboarding.
+3. Send, edit, and delete a message in a normal guild channel; join and remove a test member if available.
+4. Query the analytics endpoint for a UTC range covering those events and confirm ordered hourly buckets and summary counters.
+5. Confirm no `MESSAGE_CONTENT` intent is enabled in the Discord Developer Portal or application logs.
+6. Re-run the same event source through tests or local replay and confirm duplicate source ids do not increment counters again.
+
+RabbitMQ, Kafka, Redis, a separate analytics database, real-time dashboards, moderation automation, message-content analysis, and distributed deployment are intentionally deferred. The current implementation keeps the durable queue and projection in PostgreSQL inside the modular monolith until measured scale or ownership pressure justifies additional infrastructure.
 
 ## Authenticate operators with Discord OAuth2
 
@@ -346,7 +422,7 @@ Send the returned `token` on each state-changing request using the returned `hea
 
 ## Run tests and verification
 
-The integration test starts its own PostgreSQL container, runs Flyway, loads the Spring application context, and checks the resulting schema. Docker Desktop must be running.
+The integration tests start PostgreSQL containers, run Flyway, load the Spring application context, and check persistence behavior against real PostgreSQL features such as `ON CONFLICT` and `FOR UPDATE SKIP LOCKED`. Docker Desktop must be running.
 
 ```bash
 cd backend
@@ -358,6 +434,6 @@ CI runs the same Maven `verify` lifecycle on pushes to `main` and pull requests 
 
 ## Configuration model
 
-Shared configuration requires `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`, making non-local runtime configuration explicit. The `local` profile supplies documented local-only defaults. `GUILDOS_DISCORD_ENABLED` and `GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED` default to `false`; their respective bot token or OAuth client credentials are required only when enabled. Hibernate validates the schema but never creates or updates it; Flyway owns all schema changes.
+Shared configuration requires `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`, making non-local runtime configuration explicit. The `local` profile supplies documented local-only defaults. `GUILDOS_DISCORD_ENABLED` and `GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED` default to `false`; their respective bot token or OAuth client credentials are required only when enabled. Activity processing defaults are safe and bounded under `guildos.activity.processing.*`, and automatic processing can be disabled with `GUILDOS_ACTIVITY_PROCESSING_ENABLED=false` for deterministic tests. Hibernate validates the schema but never creates or updates it; Flyway owns all schema changes.
 
 See [the architecture overview](docs/architecture.md) and [ADR 0001](docs/adr/0001-modular-monolith.md) for the initial design decisions.
