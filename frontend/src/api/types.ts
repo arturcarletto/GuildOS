@@ -99,6 +99,14 @@ export interface ActivityAnalytics {
   buckets: ActivityBucket[];
 }
 
+/** Active Discord text/announcement channel synced from the bot's Gateway cache. */
+export interface GuildChannelSummary {
+  discordChannelId: string;
+  name: string;
+  type: string;
+  displayName: string;
+}
+
 /** Which member lifecycle message a configuration targets. */
 export type MemberMessageKind = 'welcome' | 'goodbye';
 

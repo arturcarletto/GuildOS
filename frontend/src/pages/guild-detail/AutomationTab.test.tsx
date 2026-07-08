@@ -3,7 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, api } from '../../api/client';
-import type { MemberMessageConfig, MemberMessagePreview } from '../../api/types';
+import type {
+  GuildChannelSummary,
+  MemberMessageConfig,
+  MemberMessagePreview,
+} from '../../api/types';
 import AutomationTab from './AutomationTab';
 
 vi.mock('../../api/client', async () => {
@@ -11,6 +15,7 @@ vi.mock('../../api/client', async () => {
   return {
     ...actual,
     api: {
+      listGuildChannels: vi.fn(),
       getMemberMessageConfig: vi.fn(),
       updateMemberMessageConfig: vi.fn(),
       toggleMemberMessageConfig: vi.fn(),
@@ -20,6 +25,21 @@ vi.mock('../../api/client', async () => {
 });
 
 const mockedApi = vi.mocked(api);
+
+const CHANNELS: GuildChannelSummary[] = [
+  {
+    discordChannelId: '123456789012345678',
+    name: 'welcome',
+    type: 'TEXT',
+    displayName: '#welcome',
+  },
+  {
+    discordChannelId: '223456789012345678',
+    name: 'announcements',
+    type: 'NEWS',
+    displayName: '#announcements',
+  },
+];
 
 function unconfigured(kind: 'WELCOME' | 'GOODBYE'): MemberMessageConfig {
   return {
@@ -65,6 +85,7 @@ async function getCard(heading: string): Promise<HTMLElement> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedApi.listGuildChannels.mockResolvedValue(CHANNELS);
   mockedApi.getMemberMessageConfig.mockImplementation((_guildId, kind) =>
     Promise.resolve(unconfigured(kind === 'welcome' ? 'WELCOME' : 'GOODBYE')),
   );
@@ -89,6 +110,16 @@ describe('AutomationTab', () => {
     expect(within(goodbye).queryByLabelText('Button label')).not.toBeInTheDocument();
   });
 
+  it('renders fetched channels in the channel dropdown', async () => {
+    render(<AutomationTab guildId="g1" />);
+
+    const welcome = await getCard('Welcome message');
+
+    expect(await within(welcome).findByRole('option', { name: '#welcome' })).toBeInTheDocument();
+    expect(within(welcome).getByRole('option', { name: '#announcements' })).toBeInTheDocument();
+    expect(within(welcome).getByLabelText('Channel')).toBeInTheDocument();
+  });
+
   it('saves the welcome configuration with the correct API call', async () => {
     const user = userEvent.setup();
     mockedApi.updateMemberMessageConfig.mockResolvedValue(configuredWelcome());
@@ -96,7 +127,8 @@ describe('AutomationTab', () => {
     render(<AutomationTab guildId="g1" />);
     const welcome = await getCard('Welcome message');
 
-    await user.type(within(welcome).getByLabelText('Channel ID'), '123456789012345678');
+    await within(welcome).findByRole('option', { name: '#welcome' });
+    await user.selectOptions(within(welcome).getByLabelText('Channel'), '123456789012345678');
     await user.type(within(welcome).getByLabelText('Message'), 'Welcome friends');
     await user.click(within(welcome).getByRole('button', { name: 'Create message' }));
 
@@ -152,7 +184,8 @@ describe('AutomationTab', () => {
     render(<AutomationTab guildId="g1" />);
     const welcome = await getCard('Welcome message');
 
-    await user.type(within(welcome).getByLabelText('Channel ID'), '123456789012345678');
+    await within(welcome).findByRole('option', { name: '#welcome' });
+    await user.selectOptions(within(welcome).getByLabelText('Channel'), '123456789012345678');
     await user.type(within(welcome).getByLabelText('Message'), 'Welcome friends');
     await user.click(within(welcome).getByRole('button', { name: 'Preview' }));
 
@@ -175,13 +208,67 @@ describe('AutomationTab', () => {
     render(<AutomationTab guildId="g1" />);
     const welcome = await getCard('Welcome message');
 
-    await user.type(within(welcome).getByLabelText('Channel ID'), '123456789012345678');
+    await within(welcome).findByRole('option', { name: '#welcome' });
+    await user.selectOptions(within(welcome).getByLabelText('Channel'), '123456789012345678');
     await user.type(within(welcome).getByLabelText('Message'), 'Hi');
     await user.click(within(welcome).getByRole('button', { name: 'Create message' }));
 
     expect(
       await within(welcome).findByText('The color must be a hexadecimal value such as #57F287'),
     ).toBeInTheDocument();
+  });
+
+  it('falls back to manual entry when no synced channels are available', async () => {
+    mockedApi.listGuildChannels.mockResolvedValueOnce([]);
+
+    render(<AutomationTab guildId="g1" />);
+    const welcome = await getCard('Welcome message');
+
+    expect(
+      await within(welcome).findByText('No synced text or announcement channels are available.'),
+    ).toBeInTheDocument();
+    expect(within(welcome).getByLabelText('Channel ID')).toBeInTheDocument();
+  });
+
+  it('shows a safe error and manual entry when channel loading fails', async () => {
+    mockedApi.listGuildChannels.mockRejectedValueOnce(new ApiError(500, { error: 'server_error' }));
+
+    render(<AutomationTab guildId="g1" />);
+    const welcome = await getCard('Welcome message');
+
+    expect(
+      await within(welcome).findByText('The server ran into a problem. Please try again shortly.'),
+    ).toBeInTheDocument();
+    expect(within(welcome).getByLabelText('Channel ID')).toBeInTheDocument();
+  });
+
+  it('warns when the saved channel is no longer in the synced list and allows replacing it', async () => {
+    const user = userEvent.setup();
+    mockedApi.getMemberMessageConfig.mockImplementation((_guildId, kind) =>
+      Promise.resolve(
+        kind === 'welcome'
+          ? { ...configuredWelcome(), channelId: '999999999999999999' }
+          : unconfigured('GOODBYE'),
+      ),
+    );
+    mockedApi.updateMemberMessageConfig.mockResolvedValue(configuredWelcome());
+
+    render(<AutomationTab guildId="g1" />);
+    const welcome = await getCard('Welcome message');
+
+    expect(
+      await within(welcome).findByText(/The saved channel is not in the latest synced/),
+    ).toBeInTheDocument();
+    await user.selectOptions(within(welcome).getByLabelText('Channel'), '123456789012345678');
+    await user.click(within(welcome).getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(mockedApi.updateMemberMessageConfig).toHaveBeenCalledWith(
+        'g1',
+        'welcome',
+        expect.objectContaining({ channelId: '123456789012345678' }),
+      );
+    });
   });
 
   it('shows an error state when the config fails to load', async () => {

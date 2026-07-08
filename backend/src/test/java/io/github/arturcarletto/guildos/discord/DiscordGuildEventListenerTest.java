@@ -4,6 +4,10 @@ import java.util.List;
 
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.events.channel.ChannelCreateEvent;
+import net.dv8tion.jda.api.events.channel.ChannelDeleteEvent;
+import net.dv8tion.jda.api.events.channel.GenericChannelEvent;
+import net.dv8tion.jda.api.events.channel.update.GenericChannelUpdateEvent;
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildLeaveEvent;
 import net.dv8tion.jda.api.events.session.ReadyEvent;
@@ -15,18 +19,22 @@ import io.github.arturcarletto.guildos.guild.DisconnectGuildCommand;
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class DiscordGuildEventListenerTest {
 
     private final GuildConnectionService service = mock(GuildConnectionService.class);
     private final DiscordGuildCommandRegistrar commandRegistrar = mock(DiscordGuildCommandRegistrar.class);
+    private final DiscordGuildChannelCacheSync channelCacheSync = mock(DiscordGuildChannelCacheSync.class);
     private final DiscordGuildEventListener listener =
-            new DiscordGuildEventListener(service, commandRegistrar);
+            new DiscordGuildEventListener(service, commandRegistrar, channelCacheSync);
 
     @Test
     void readySynchronizesEveryCurrentlyConnectedGuild() {
@@ -43,6 +51,8 @@ class DiscordGuildEventListenerTest {
         verify(service).connect(new ConnectGuildCommand("2002", "Second Guild"));
         verify(commandRegistrar).reconcile(firstGuild);
         verify(commandRegistrar).reconcile(secondGuild);
+        verify(channelCacheSync).sync(firstGuild);
+        verify(channelCacheSync).sync(secondGuild);
     }
 
     @Test
@@ -52,9 +62,10 @@ class DiscordGuildEventListenerTest {
 
         listener.onGuildJoin(new GuildJoinEvent(jda, 1, guild));
 
-        InOrder order = inOrder(service, commandRegistrar);
+        InOrder order = inOrder(service, commandRegistrar, channelCacheSync);
         order.verify(service).connect(new ConnectGuildCommand("2003", "Joined Guild"));
         order.verify(commandRegistrar).reconcile(guild);
+        order.verify(channelCacheSync).sync(guild);
     }
 
     @Test
@@ -66,20 +77,64 @@ class DiscordGuildEventListenerTest {
 
         verify(service).disconnect(new DisconnectGuildCommand("2004"));
         verify(commandRegistrar, never()).reconcile(guild);
+        verify(channelCacheSync, never()).sync(guild);
+    }
+
+    @Test
+    void guildChannelMetadataEventsRefreshGuildChannels() {
+        Guild guild = guild("2005", "Channel Event Guild");
+
+        listener.onChannelCreate(guildChannelEvent(ChannelCreateEvent.class, guild));
+        listener.onGenericChannelUpdate(guildChannelEvent(GenericChannelUpdateEvent.class, guild));
+        listener.onChannelDelete(guildChannelEvent(ChannelDeleteEvent.class, guild));
+
+        verify(channelCacheSync, times(3)).sync(guild);
+        verifyNoInteractions(service, commandRegistrar);
+    }
+
+    @Test
+    void nonGuildChannelEventsAreIgnored() {
+        ChannelCreateEvent event = mock(ChannelCreateEvent.class);
+        when(event.isFromGuild()).thenReturn(false);
+
+        listener.onChannelCreate(event);
+
+        verifyNoInteractions(channelCacheSync, service, commandRegistrar);
+    }
+
+    @Test
+    void channelRefreshFailureDoesNotEscapeJdaDispatch() {
+        Guild guild = guild("2006", "Channel Failure Guild");
+        ChannelCreateEvent event = guildChannelEvent(ChannelCreateEvent.class, guild);
+        doThrow(new IllegalStateException("database detail")).when(channelCacheSync).sync(guild);
+
+        assertThatCode(() -> listener.onChannelCreate(event)).doesNotThrowAnyException();
+
+        verify(channelCacheSync).sync(guild);
+        verifyNoInteractions(service, commandRegistrar);
     }
 
     @Test
     void registrationFailureDoesNotPreventGuildConnectionOrEscape() {
         JDA jda = mock(JDA.class);
-        Guild guild = guild("2005", "Registration Failure Guild");
+        Guild guild = guild("2007", "Registration Failure Guild");
         when(guild.updateCommands()).thenThrow(new IllegalStateException("sensitive upstream detail"));
         DiscordGuildEventListener listenerWithRealRegistrar = new DiscordGuildEventListener(
                 service,
-                new DiscordGuildCommandRegistrar(new DiscordCommandCatalog()));
+                new DiscordGuildCommandRegistrar(new DiscordCommandCatalog()),
+                channelCacheSync);
 
         assertThatCode(() -> listenerWithRealRegistrar.onGuildJoin(new GuildJoinEvent(jda, 1, guild)))
                 .doesNotThrowAnyException();
-        verify(service).connect(new ConnectGuildCommand("2005", "Registration Failure Guild"));
+        verify(service).connect(new ConnectGuildCommand("2007", "Registration Failure Guild"));
+        verify(channelCacheSync).sync(guild);
+    }
+
+    private <T extends GenericChannelEvent> T guildChannelEvent(Class<T> eventType, Guild guild) {
+        T event = mock(eventType);
+        when(event.isFromGuild()).thenReturn(true);
+        when(event.getGuild()).thenReturn(guild);
+        return event;
     }
 
     private Guild guild(String id, String name) {

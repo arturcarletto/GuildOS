@@ -28,6 +28,7 @@ import type {
   CsrfToken,
   CurrentOperator,
   EligibleGuild,
+  GuildChannelSummary,
   GuildSettings,
   MemberMessageConfig,
   MemberMessageKind,
@@ -275,6 +276,28 @@ function parseActivityAnalytics(value: unknown): ActivityAnalytics {
   };
 }
 
+function parseGuildChannelSummary(value: unknown): GuildChannelSummary | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const discordChannelId = asString(value.discordChannelId);
+  if (!discordChannelId) {
+    return null;
+  }
+  const name = asRequiredString(value.name);
+  return {
+    discordChannelId,
+    name,
+    type: asRequiredString(value.type),
+    displayName: asRequiredString(value.displayName, name ? `#${name}` : discordChannelId),
+  };
+}
+
+function parseGuildChannels(value: unknown): GuildChannelSummary[] {
+  const source = isRecord(value) ? value : {};
+  return asArray(source.channels, parseGuildChannelSummary);
+}
+
 function parseMemberMessageConfig(value: unknown): MemberMessageConfig {
   const source = isRecord(value) ? value : {};
   return {
@@ -375,6 +398,13 @@ export const api = {
     return getJson(
       `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/analytics/activity?${query.toString()}`,
       parseActivityAnalytics,
+    );
+  },
+
+  listGuildChannels(discordGuildId: string): Promise<GuildChannelSummary[]> {
+    return getJson(
+      `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/channels`,
+      parseGuildChannels,
     );
   },
 

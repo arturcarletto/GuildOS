@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Configuration;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
 import io.github.arturcarletto.guildos.guildactivity.GuildActivityIngestionService;
+import io.github.arturcarletto.guildos.discordchannel.DiscordGuildChannelSyncService;
 import io.github.arturcarletto.guildos.guildmembermessage.GuildMemberMessageService;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
 
@@ -36,8 +37,16 @@ class DiscordConfiguration {
     @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
     DiscordGuildEventListener discordGuildEventListener(
             GuildConnectionService guildConnectionService,
-            DiscordGuildCommandRegistrar commandRegistrar) {
-        return new DiscordGuildEventListener(guildConnectionService, commandRegistrar);
+            DiscordGuildCommandRegistrar commandRegistrar,
+            DiscordGuildChannelCacheSync channelCacheSync) {
+        return new DiscordGuildEventListener(guildConnectionService, commandRegistrar, channelCacheSync);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordGuildChannelCacheSync discordGuildChannelCacheSync(
+            DiscordGuildChannelSyncService channelSyncService) {
+        return new DiscordGuildChannelCacheSync(channelSyncService);
     }
 
     @Bean

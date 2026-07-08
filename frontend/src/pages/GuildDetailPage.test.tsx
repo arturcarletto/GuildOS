@@ -13,6 +13,7 @@ vi.mock('../api/client', async () => {
     ...actual,
     api: {
       listAuthorizedGuilds: vi.fn(),
+      listGuildChannels: vi.fn(),
       getMemberMessageConfig: vi.fn(),
     },
   };
@@ -38,6 +39,7 @@ beforeEach(() => {
   mockedApi.listAuthorizedGuilds.mockResolvedValue([
     { guildId: '123456789012345678', name: 'Test Guild', role: 'OWNER' },
   ]);
+  mockedApi.listGuildChannels.mockResolvedValue([]);
   mockedApi.getMemberMessageConfig.mockImplementation((_guildId, kind) =>
     Promise.resolve({
       kind: kind === 'welcome' ? 'WELCOME' : 'GOODBYE',
