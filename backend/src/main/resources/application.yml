@@ -26,6 +26,10 @@ guildos:
   discord:
     enabled: ${GUILDOS_DISCORD_ENABLED:false}
     token: ${DISCORD_BOT_TOKEN:}
+  telegram:
+    enabled: ${GUILDOS_TELEGRAM_ENABLED:false}
+    bot-token: ${TELEGRAM_BOT_TOKEN:}
+    poll-interval: ${GUILDOS_TELEGRAM_POLL_INTERVAL:2s}
   identity:
     discord-oauth:
       enabled: ${GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED:false}

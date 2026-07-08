@@ -1,10 +1,10 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, the guild-scoped `/status` command, Discord administration and delivery of welcome/goodbye messages, durable Discord activity ingestion, authorized hourly activity analytics, and a first operator dashboard frontend that consumes the existing authenticated APIs.
+Guild OS is a platform for managing, automating, and analyzing online communities. It is evolving from a Discord-first backend toward multi-platform community management: a Guild OS core (activity ingestion, analytics, operator/dashboard APIs, onboarding, settings, and small platform-neutral abstractions) with pluggable platform adapters. Discord is the first complete adapter; Telegram is an experimental, disabled-by-default proof-of-concept adapter. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, the guild-scoped `/status` command, Discord administration and delivery of welcome/goodbye messages, durable Discord activity ingestion, authorized hourly activity analytics, a first operator dashboard frontend that consumes the existing authenticated APIs, and a minimal Telegram adapter that answers a `/ping` command.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend and frontend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, an authorized hourly analytics API, and a first React operator dashboard frontend for sign-in, onboarding, settings, and analytics. Bot Gateway and human OAuth integrations are independently disabled by default. The frontend is an early foundation: real-time dashboards, moderation, AI features, billing, retention automation, and advanced analytics visualization are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend and frontend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, an authorized hourly analytics API, a first React operator dashboard frontend for sign-in, onboarding, settings, and analytics, a small platform-neutral abstraction layer, and an experimental Telegram adapter proof of concept. Bot Gateway, human OAuth, and Telegram integrations are independently disabled by default. Discord remains the first complete adapter; the Telegram adapter is an early proof of concept that only answers `/ping` and does not yet onboard chats, authenticate operators, persist activity, or deliver welcome/goodbye messages. The frontend is an early foundation: real-time dashboards, moderation, AI features, billing, retention automation, and advanced analytics visualization are not implemented yet.
 
 ## Technology stack
 
@@ -50,6 +50,7 @@ GuildOS/
 |   `-- tsconfig.json
 |-- docs/
 |   |-- adr/0001-modular-monolith.md
+|   |-- adr/0002-platform-adapter-architecture.md
 |   `-- architecture.md
 |-- .editorconfig
 |-- .env.example
@@ -502,6 +503,45 @@ npm run lint       # run ESLint
 
 Frontend CI (`.github/workflows/frontend-ci.yml`) runs `npm ci`, `npm run lint`, `npm run test`, and `npm run build` on Node 22 for pull requests targeting `main` and pushes to `main`, independently of the backend CI workflow.
 
+## Experimental Telegram adapter (proof of concept)
+
+Guild OS is evolving from a Discord-first backend into a multi-platform community-management core with pluggable platform adapters. A small `io.github.arturcarletto.guildos.platform` package holds adapter-neutral abstractions (`CommunityPlatform`, the platform-scoped ids, `IncomingCommunityEvent`, `PlatformBotCommand`, `PlatformMessageSender`), and the Discord integration is the first complete adapter. The `io.github.arturcarletto.guildos.telegram` package adds a **minimal, experimental Telegram adapter** as a second-platform proof of concept.
+
+Scope is intentionally tiny: the Telegram adapter long-polls for updates and answers a single command, `/ping`, with `GuildOS is online.`. It does not onboard Telegram chats, authenticate operators, persist any activity, or deliver welcome/goodbye messages. It never stores or logs message text, and the bot token is never written to logs, actuator output, exceptions, or `toString`.
+
+The adapter is **disabled by default**. With Telegram disabled, the application starts without a token, makes no Telegram HTTP calls, and starts no polling thread.
+
+### Enable it locally
+
+Create a bot with [@BotFather](https://t.me/BotFather) in the Telegram app to obtain a bot token, then set these variables in the shell session that starts Spring Boot:
+
+```bash
+export GUILDOS_TELEGRAM_ENABLED=true
+export TELEGRAM_BOT_TOKEN=your-local-telegram-bot-token
+```
+
+Never commit or share a real bot token. Do not put a real token in `.env.example` or any other tracked file. When Telegram is enabled, a bot token is required; a missing or blank token fails startup fast with a safe configuration error that does not print the token. The polling interval defaults to 2 seconds and can be overridden with `GUILDOS_TELEGRAM_POLL_INTERVAL` (for example `5s`).
+
+With PostgreSQL running, start the backend with the local profile:
+
+```bash
+cd backend
+sh ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+### Test `/ping` manually
+
+1. Start the backend with Telegram enabled as above.
+2. In Telegram, open a direct chat with your bot (or add it to a test group).
+3. Send `/ping` (in a group, `/ping@YourBotName` also works).
+4. The bot replies `GuildOS is online.`.
+
+Any other message is ignored safely. The poller keeps running if Telegram returns an error or a malformed update, and a single bad update never crashes it. Because updates are consumed with an in-memory offset, restarting the backend may re-deliver a very recent `/ping`; this is expected for the proof of concept.
+
+### Not implemented yet
+
+Telegram onboarding, Telegram OAuth, Telegram dashboard support, Telegram welcome/goodbye, Telegram moderation, and a Telegram activity-ingestion bridge are deliberately deferred. The current activity pipeline is keyed to the Discord guild registry, so bridging Telegram message metadata into it would require schema and model changes; that is documented as a follow-up rather than implemented here. See [ADR 0002](docs/adr/0002-platform-adapter-architecture.md) for the rationale.
+
 ## Run tests and verification
 
 The integration tests start PostgreSQL containers, run Flyway, load the Spring application context, and check persistence behavior against real PostgreSQL features such as `ON CONFLICT` and `FOR UPDATE SKIP LOCKED`. Docker Desktop must be running.
@@ -518,4 +558,4 @@ CI runs the same Maven `verify` lifecycle on pushes to `main` and pull requests 
 
 Shared configuration requires `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`, making non-local runtime configuration explicit. The `local` profile supplies documented local-only defaults. `GUILDOS_DISCORD_ENABLED` and `GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED` default to `false`; their respective bot token or OAuth client credentials are required only when enabled. Activity processing defaults are safe and bounded under `guildos.activity.processing.*`, and automatic processing can be disabled with `GUILDOS_ACTIVITY_PROCESSING_ENABLED=false` for deterministic tests. Hibernate validates the schema but never creates or updates it; Flyway owns all schema changes.
 
-See [the architecture overview](docs/architecture.md) and [ADR 0001](docs/adr/0001-modular-monolith.md) for the initial design decisions.
+See [the architecture overview](docs/architecture.md), [ADR 0001](docs/adr/0001-modular-monolith.md), and [ADR 0002](docs/adr/0002-platform-adapter-architecture.md) for the initial design decisions.
