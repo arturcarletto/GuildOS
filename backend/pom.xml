@@ -99,6 +99,25 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!--
+                        Isolate the test suite from developer-local Discord OAuth environment
+                        variables (GUILDOS_IDENTITY_DISCORD_OAUTH_ENABLED, DISCORD_OAUTH_CLIENT_ID,
+                        DISCORD_OAUTH_CLIENT_SECRET, DISCORD_OAUTH_REDIRECT_URI). Java system
+                        properties outrank OS environment variables in Spring's property resolution,
+                        so these deterministic test defaults win over any leaked shell variables.
+                        Tests that specifically exercise OAuth still override these via @SpringBootTest
+                        properties. Production validation in DiscordOAuthProperties is untouched.
+                    -->
+                    <systemPropertyVariables>
+                        <guildos.identity.discord-oauth.enabled>false</guildos.identity.discord-oauth.enabled>
+                        <guildos.identity.discord-oauth.redirect-uri>{baseUrl}/login/oauth2/code/discord</guildos.identity.discord-oauth.redirect-uri>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>

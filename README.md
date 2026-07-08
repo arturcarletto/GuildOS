@@ -1,10 +1,10 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, the guild-scoped `/status` command, Discord administration and delivery of welcome/goodbye messages, durable Discord activity ingestion, and authorized hourly activity analytics.
+Guild OS is a platform for managing, automating, and analyzing Discord communities. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, the guild-scoped `/status` command, Discord administration and delivery of welcome/goodbye messages, durable Discord activity ingestion, authorized hourly activity analytics, and a first operator dashboard frontend that consumes the existing authenticated APIs.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, and an authorized hourly analytics API. Bot Gateway and human OAuth integrations are independently disabled by default. Moderation rules, broader guild management, real-time dashboards, retention automation, AI features, and a frontend are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend and frontend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, an authorized hourly analytics API, and a first React operator dashboard frontend for sign-in, onboarding, settings, and analytics. Bot Gateway and human OAuth integrations are independently disabled by default. The frontend is an early foundation: real-time dashboards, moderation, AI features, billing, retention automation, and advanced analytics visualization are not implemented yet.
 
 ## Technology stack
 
@@ -23,7 +23,9 @@ The project is at the initial bootstrap stage. It provides a runnable Spring Boo
 
 ```text
 GuildOS/
-|-- .github/workflows/backend-ci.yml
+|-- .github/workflows/
+|   |-- backend-ci.yml
+|   `-- frontend-ci.yml
 |-- backend/
 |   |-- .mvn/wrapper/
 |   |-- src/main/
@@ -31,6 +33,21 @@ GuildOS/
 |   |-- mvnw
 |   |-- mvnw.cmd
 |   `-- pom.xml
+|-- frontend/
+|   |-- public/
+|   |-- src/
+|   |   |-- api/          # typed API client, DTO types, CSRF/session handling
+|   |   |-- auth/         # session/auth React context
+|   |   |-- components/   # app shell, shared UI, formatting helpers
+|   |   |-- hooks/        # async data-loading hook
+|   |   |-- pages/        # landing, dashboard, guilds, guild detail tabs
+|   |   |-- styles/       # design tokens and layout CSS
+|   |   `-- test/         # Vitest setup and render helpers
+|   |-- index.html
+|   |-- package.json
+|   |-- vite.config.ts
+|   |-- eslint.config.js
+|   `-- tsconfig.json
 |-- docs/
 |   |-- adr/0001-modular-monolith.md
 |   `-- architecture.md
@@ -47,8 +64,9 @@ GuildOS/
 - JDK 21 available on `PATH`
 - Docker Desktop with Docker Compose enabled
 - Bash-compatible shell, such as Linux, macOS, WSL, or Git Bash
+- Node.js LTS (Node 22 recommended) and npm, for the operator dashboard frontend
 
-Maven does not need to be installed; the repository includes the Maven Wrapper.
+Maven does not need to be installed; the repository includes the Maven Wrapper. Node.js and npm are only required to run or build the `frontend/` dashboard.
 
 ## Start locally with Bash
 
@@ -326,7 +344,13 @@ Never commit or share the client secret. With PostgreSQL running, start the back
 http://localhost:8080/oauth2/authorization/discord
 ```
 
-After Discord authentication, the backend redirects to `GET /api/v1/me`. That protected endpoint returns only the local operator ID and safe Discord profile fields. Discord access and refresh tokens are never stored in Guild OS domain tables, and OAuth tokens and client secrets are never exposed by any API. Authentication establishes operator identity; onboarding a guild to authorize its management is described in the next section.
+After Discord authentication, the backend redirects to a configurable success URL that defaults to `GET /api/v1/me`. That protected endpoint returns only the local operator ID and safe Discord profile fields. Discord access and refresh tokens are never stored in Guild OS domain tables, and OAuth tokens and client secrets are never exposed by any API. Authentication establishes operator identity; onboarding a guild to authorize its management is described in the next section.
+
+The post-login redirect is controlled by `guildos.identity.discord-oauth.success-redirect-uri` (environment variable `DISCORD_OAUTH_SUCCESS_REDIRECT_URI`). The default profile keeps the original `/api/v1/me` behavior, while the `local` profile points it at the operator dashboard on the Vite dev server (`http://localhost:5173/dashboard`) so a browser lands back in the dashboard after signing in. Set `DISCORD_OAUTH_SUCCESS_REDIRECT_URI` to override it for any environment:
+
+```bash
+export DISCORD_OAUTH_SUCCESS_REDIRECT_URI=http://localhost:5173/dashboard
+```
 
 Spring Security uses a server-side HTTP session. Logout uses `POST /logout` and requires the active CSRF token; successful logout returns HTTP 204. The current in-memory, single-instance session strategy must be revisited before horizontal scaling rather than adding distributed session storage prematurely.
 
@@ -421,6 +445,62 @@ It requires an authenticated session (it stays under the `/api/**` policy) and r
 ```
 
 Send the returned `token` on each state-changing request using the returned `headerName` (for example `X-CSRF-TOKEN: <token>`), keeping the same session cookie so the server can match it. A browser calls `GET /api/v1/csrf` after login, then includes the returned header on subsequent state-changing `POST`, `PUT`, and `DELETE` requests, including `POST /logout`; a successful logout returns `204 No Content`. The token is never exposed through any other endpoint, DTO, or log.
+
+## Operator dashboard frontend
+
+The `frontend/` directory contains the first operator dashboard: a React + TypeScript single-page application built with Vite. It is a separate application in the monorepo and does not change or replace the backend. It signs an operator in through the existing Discord OAuth flow, then reads and writes only through the authenticated `/api/**` endpoints using the server-side session cookie and CSRF token — it never stores OAuth or session tokens in the browser.
+
+### Prerequisites
+
+- Node.js LTS (Node 22 recommended) and npm.
+
+### Run the backend
+
+Start the backend first so the frontend has an API to call. With PostgreSQL running and Discord OAuth enabled (see the OAuth section above), run from the repository root:
+
+```bash
+cd backend
+sh ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+The backend listens on `http://localhost:8080`.
+
+### Run the frontend
+
+In a second terminal, from the repository root:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite dev server starts on `http://localhost:5173`. It proxies the `/api`, `/oauth2`, `/login`, and `/logout` paths to the backend at `http://localhost:8080`, so browser requests stay same-origin during development and no CORS changes or Spring Security relaxation are needed. Set `GUILDOS_BACKEND_ORIGIN` before `npm run dev` to point the proxy at a different backend origin.
+
+### Session, CSRF, and local OAuth flow
+
+The frontend relies entirely on the backend for authentication and authorization:
+
+- Sign-in starts from the frontend "Sign in with Discord" button, which navigates to `/oauth2/authorization/discord`.
+- The backend performs the Discord OAuth handshake and establishes a server-side session; the browser never receives Discord tokens.
+- The frontend then calls the authenticated `/api/**` endpoints with `credentials: "include"` so the session cookie is sent.
+- `GET` requests need no CSRF token. For `POST`, `PUT`, `DELETE`, and `POST /logout`, the client fetches the token from `GET /api/v1/csrf`, caches it in memory, and sends it using the returned `headerName`. A 403 triggers one automatic token refresh and retry.
+
+Because the registered Discord redirect URI points at `http://localhost:8080`, the OAuth handshake completes on the backend origin. Under the `local` profile the backend then redirects the browser to `http://localhost:5173/dashboard` (via `guildos.identity.discord-oauth.success-redirect-uri`, overridable with `DISCORD_OAUTH_SUCCESS_REDIRECT_URI`), so operators land back in the dashboard signed in through the shared `localhost` session cookie. The default profile keeps the original `/api/v1/me` behavior. Serving the built assets from Spring Boot in production remains a deliberate follow-up rather than a security shortcut.
+
+### Frontend commands
+
+```bash
+cd frontend
+npm install        # install dependencies and create/update package-lock.json
+npm run dev        # start the Vite dev server on port 5173
+npm run test       # run the Vitest suite once
+npm run build      # type-check and produce a production build in dist/
+npm run preview    # preview the production build
+npm run lint       # run ESLint
+```
+
+Frontend CI (`.github/workflows/frontend-ci.yml`) runs `npm ci`, `npm run lint`, `npm run test`, and `npm run build` on Node 22 for pull requests targeting `main` and pushes to `main`, independently of the backend CI workflow.
 
 ## Run tests and verification
 

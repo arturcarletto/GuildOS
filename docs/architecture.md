@@ -105,7 +105,7 @@ Metrics use bounded tags only: activity event type and outcome. Processing outco
 3. Spring Security handles the authorization-code callback and retrieves Discord user information.
 4. The identity OAuth adapter validates and maps safe profile attributes into a platform-neutral login command.
 5. The identity service creates or updates the operator account in PostgreSQL and returns the local operator identity.
-6. Spring Security stores the authenticated principal in the server-side HTTP session and redirects to `/api/v1/me`.
+6. Spring Security stores the authenticated principal in the server-side HTTP session and redirects to the configured success URL (`guildos.identity.discord-oauth.success-redirect-uri`, default `/api/v1/me`).
 
 The dependency direction is: Browser -> Spring Security OAuth2 -> Discord user-info -> identity service -> PostgreSQL -> authenticated session. This human operator OAuth login is separate from the JDA bot Gateway in the `discord` package; the two integrations are enabled independently, and neither depends on the other. Access and refresh tokens are not stored in Guild OS domain tables or exposed through the API. Authentication establishes operator identity; the `guildaccess` capability, described next, builds the first authorization boundary on top of it. Sessions are local to the single application instance and require a deliberate scaling design before multiple instances are deployed.
 
@@ -137,6 +137,20 @@ The dependency direction is:
 6. A real update flushes before response mapping so the returned JPA version is current. A canonical no-op changes neither version nor `updatedAt`; a stale version returns a conflict without partial mutation.
 
 Each settings transaction captures one clock instant and reuses it for all timestamps it writes. Reads and updates remain available while the bot registry entry is disconnected because active Guild OS authorization, rather than live Gateway state, governs this capability. No Discord HTTP request occurs inside or outside a settings read/update transaction.
+
+## Operator dashboard frontend
+
+The `frontend/` directory holds the first operator dashboard: a separate React + TypeScript single-page application built with Vite and tested with Vitest, React Testing Library, and jsdom. It is a distinct application in the monorepo, not a rewrite of or a dependency for the backend. The backend keeps ownership of Discord OAuth, the server-side session, CSRF, and every authorization decision; the frontend is a thin, security-conscious client over the existing `/api/**` and auth endpoints.
+
+The dependency direction is one way:
+
+`React pages -> typed API client -> browser fetch (credentials: include) -> Vite dev proxy or same-origin -> Spring Security + /api/** controllers`
+
+Session and CSRF handling is centralized in `src/api/client.ts`. Every request sends `credentials: "include"` so the server-side session cookie flows on same-origin calls. GET requests never carry a CSRF token. State-changing requests (`POST`/`PUT`/`DELETE` and `POST /logout`) fetch the token from `GET /api/v1/csrf`, cache it in memory only, and send it using the header name the backend returns rather than a hardcoded header. A 403 on a state-changing request invalidates the cached token, re-fetches once, and retries, which absorbs a rotated or stale token. Non-OK responses become a typed `ApiError` carrying the HTTP status and best-effort parsed body; 401 is treated as signed-out, and 409 on settings drives a reload of the latest server state. The client never reads, stores, or logs OAuth or session tokens, and never persists the CSRF token to web storage. Responses are parsed defensively from `unknown`, so a minor backend field addition degrades to a safe partial render instead of a crash.
+
+Routing uses `react-router-dom` with a public landing route, an authenticated dashboard shell (`/dashboard`, `/dashboard/guilds`, `/dashboard/guilds/:discordGuildId`), and a not-found fallback. An `AuthProvider` probes `GET /api/v1/me` once, exposes the current operator, and the shell redirects unauthenticated visitors to the landing page. Analytics range controls generate only UTC-hour-aligned `from`/`to` instants in the client to satisfy the endpoint's boundary rules, and cap the range at 31 days before calling the API.
+
+During local development the Vite dev server (port 5173) proxies `/api`, `/oauth2`, `/login`, and `/logout` to the backend at `http://localhost:8080`, so browser requests stay same-origin and no CORS relaxation or Spring Security change is required. Discord OAuth still completes on the backend origin because the registered redirect URI points at port 8080; the shared `localhost` session cookie then authorizes the frontend's proxied `/api/**` calls. The post-login destination is a server-side configured property, `guildos.identity.discord-oauth.success-redirect-uri` (env `DISCORD_OAUTH_SUCCESS_REDIRECT_URI`), which defaults to `/api/v1/me` and is set to `http://localhost:5173/dashboard` under the `local` profile so operators return to the dashboard; the validation that requires a client id and secret whenever OAuth is enabled is unchanged. Serving the built assets from Spring Boot in production remains a deliberate follow-up rather than a shortcut that would weaken the security model.
 
 ## Initial request and database flow
 

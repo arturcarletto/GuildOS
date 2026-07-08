@@ -11,17 +11,27 @@ import org.springframework.validation.annotation.Validated;
 public final class DiscordOAuthProperties {
 
     static final String DEFAULT_REDIRECT_URI = "{baseUrl}/login/oauth2/code/discord";
+    static final String DEFAULT_SUCCESS_REDIRECT_URI = "/api/v1/me";
 
     private final boolean enabled;
     private final String clientId;
     private final String clientSecret;
     private final String redirectUri;
+    private final String successRedirectUri;
 
-    public DiscordOAuthProperties(boolean enabled, String clientId, String clientSecret, String redirectUri) {
+    public DiscordOAuthProperties(
+            boolean enabled,
+            String clientId,
+            String clientSecret,
+            String redirectUri,
+            String successRedirectUri) {
         this.enabled = enabled;
         this.clientId = normalize(clientId);
         this.clientSecret = normalize(clientSecret);
         this.redirectUri = StringUtils.hasText(redirectUri) ? redirectUri.trim() : DEFAULT_REDIRECT_URI;
+        this.successRedirectUri = StringUtils.hasText(successRedirectUri)
+                ? successRedirectUri.trim()
+                : DEFAULT_SUCCESS_REDIRECT_URI;
     }
 
     public boolean isEnabled() {
@@ -41,6 +51,16 @@ public final class DiscordOAuthProperties {
         return redirectUri;
     }
 
+    /**
+     * Where Spring Security sends the browser after a successful OAuth2 login. Defaults to
+     * {@code /api/v1/me} to preserve the original backend behavior; a deployment that serves the
+     * operator dashboard separately can point this at the frontend (for example the local Vite dev
+     * server) so operators land back in the dashboard instead of a JSON endpoint.
+     */
+    public String getSuccessRedirectUri() {
+        return successRedirectUri;
+    }
+
     @AssertTrue(message = "guildos.identity.discord-oauth.client-id must be configured when Discord OAuth is enabled")
     @JsonIgnore
     public boolean isClientIdConfiguredWhenEnabled() {
@@ -55,12 +75,14 @@ public final class DiscordOAuthProperties {
 
     @Override
     public String toString() {
-        return "DiscordOAuthProperties{enabled=%s, clientIdConfigured=%s, clientSecretConfigured=%s, redirectUri='%s'}"
+        return ("DiscordOAuthProperties{enabled=%s, clientIdConfigured=%s, clientSecretConfigured=%s, "
+                + "redirectUri='%s', successRedirectUri='%s'}")
                 .formatted(
                         enabled,
                         StringUtils.hasText(clientId),
                         StringUtils.hasText(clientSecret),
-                        redirectUri);
+                        redirectUri,
+                        successRedirectUri);
     }
 
     private static String normalize(String value) {

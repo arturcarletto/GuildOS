@@ -36,7 +36,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "guildos.discord.token=",
         "guildos.identity.discord-oauth.enabled=true",
         "guildos.identity.discord-oauth.client-id=fake-client-id",
-        "guildos.identity.discord-oauth.client-secret=fake-client-secret-value"
+        "guildos.identity.discord-oauth.client-secret=fake-client-secret-value",
+        "guildos.identity.discord-oauth.redirect-uri={baseUrl}/login/oauth2/code/discord"
 })
 @Import(TestcontainersConfiguration.class)
 class DiscordOAuthLoginIntegrationTest {
