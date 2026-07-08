@@ -7,6 +7,8 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.github.arturcarletto.guildos.guildaudit.GuildAuditEventType;
+import io.github.arturcarletto.guildos.guildaudit.GuildAuditRecorder;
 import io.github.arturcarletto.guildos.guildaccess.AuthorizedGuildAccess;
 import io.github.arturcarletto.guildos.guildaccess.GuildAccessAuthorizer;
 
@@ -15,14 +17,17 @@ class GuildSettingsStore {
 
     private final GuildSettingsRepository repository;
     private final GuildAccessAuthorizer authorizer;
+    private final GuildAuditRecorder auditRecorder;
     private final Clock clock;
 
     GuildSettingsStore(
             GuildSettingsRepository repository,
             GuildAccessAuthorizer authorizer,
+            GuildAuditRecorder auditRecorder,
             Clock clock) {
         this.repository = repository;
         this.authorizer = authorizer;
+        this.auditRecorder = auditRecorder;
         this.clock = clock;
     }
 
@@ -57,6 +62,10 @@ class GuildSettingsStore {
         }
         if (settings.update(replacement, now)) {
             repository.flush();
+            auditRecorder.recordOperatorEvent(
+                    access.registeredGuildId(),
+                    operatorId,
+                    GuildAuditEventType.GUILD_SETTINGS_UPDATED);
         }
         return toResponse(access, settings);
     }

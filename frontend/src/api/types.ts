@@ -99,6 +99,30 @@ export interface ActivityAnalytics {
   buckets: ActivityBucket[];
 }
 
+/** Privacy-safe guild audit event. No internal ids, session data, or raw payloads are exposed. */
+export interface GuildAuditEvent {
+  occurredAt: string;
+  eventType: string;
+  actorType: string;
+  summary: string;
+  targetType: string | null;
+  targetLabel: string | null;
+}
+
+/** `GET /api/v1/guilds/{id}/audit-log` response. */
+export interface GuildAuditLog {
+  guildId: string;
+  events: GuildAuditEvent[];
+}
+
+/** Optional filters for the guild audit-log endpoint. */
+export interface GuildAuditLogOptions {
+  limit?: number;
+  eventType?: string;
+  from?: string;
+  to?: string;
+}
+
 /** Active Discord text/announcement channel synced from the bot's Gateway cache. */
 export interface GuildChannelSummary {
   discordChannelId: string;

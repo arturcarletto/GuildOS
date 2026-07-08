@@ -5,9 +5,12 @@ import java.util.UUID;
 
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import io.github.arturcarletto.guildos.guild.GuildDirectory;
 import io.github.arturcarletto.guildos.guild.RegisteredGuildView;
+import io.github.arturcarletto.guildos.guildaudit.GuildAuditEventType;
+import io.github.arturcarletto.guildos.guildaudit.GuildAuditRecorder;
 import io.github.arturcarletto.guildos.guildaccess.GuildOnboardingDirectory;
 
 /** Platform-neutral welcome and goodbye configuration, preview, toggle and delivery use cases. */
@@ -17,14 +20,17 @@ public class GuildMemberMessageService {
     private final GuildDirectory guildDirectory;
     private final GuildOnboardingDirectory onboardingDirectory;
     private final GuildMemberMessageStore store;
+    private final GuildAuditRecorder auditRecorder;
 
     GuildMemberMessageService(
             GuildDirectory guildDirectory,
             GuildOnboardingDirectory onboardingDirectory,
-            GuildMemberMessageStore store) {
+            GuildMemberMessageStore store,
+            GuildAuditRecorder auditRecorder) {
         this.guildDirectory = guildDirectory;
         this.onboardingDirectory = onboardingDirectory;
         this.store = store;
+        this.auditRecorder = auditRecorder;
     }
 
     public GuildMemberMessageView status(String discordGuildId, MemberMessageKind kind) {
@@ -37,6 +43,7 @@ public class GuildMemberMessageService {
                 .orElseGet(() -> GuildMemberMessageView.notConfigured(kind, access.guildName()));
     }
 
+    @Transactional
     public GuildMemberMessageView configure(
             String discordGuildId, MemberMessageKind kind, ConfigureMemberMessageCommand command) {
         Access access = resolveAccess(discordGuildId, kind);
@@ -57,6 +64,7 @@ public class GuildMemberMessageService {
                             kind,
                             command.channelId(),
                             MemberMessageAppearanceFactory.forCreate(kind, command)));
+            auditRecorder.recordDiscordEvent(access.registeredGuildId(), configuredAuditEventType(kind));
             return GuildMemberMessageView.configured(access.guildName(), stored);
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildMemberMessageConflictException();
@@ -77,6 +85,7 @@ public class GuildMemberMessageService {
                 .orElseGet(() -> GuildMemberMessageView.notConfigured(kind, access.guildName()));
     }
 
+    @Transactional
     public GuildMemberMessageView toggle(String discordGuildId, MemberMessageKind kind) {
         Access access = resolveAccess(discordGuildId, kind);
         if (access.result() != null) {
@@ -89,6 +98,7 @@ public class GuildMemberMessageService {
         try {
             StoredGuildMemberMessage stored = store.toggleExisting(
                     access.registeredGuildId(), kind, snapshot.get().version());
+            auditRecorder.recordDiscordEvent(access.registeredGuildId(), toggledAuditEventType(kind));
             return GuildMemberMessageView.configured(access.guildName(), stored);
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildMemberMessageConflictException();
@@ -131,6 +141,20 @@ public class GuildMemberMessageService {
             return new Access(null, null, GuildMemberMessageView.onboardingRequired(kind, guild.name()));
         }
         return new Access(guild.registeredGuildId(), guild.name(), null);
+    }
+
+    private static GuildAuditEventType configuredAuditEventType(MemberMessageKind kind) {
+        return switch (kind) {
+            case WELCOME -> GuildAuditEventType.WELCOME_CONFIGURED;
+            case GOODBYE -> GuildAuditEventType.GOODBYE_CONFIGURED;
+        };
+    }
+
+    private static GuildAuditEventType toggledAuditEventType(MemberMessageKind kind) {
+        return switch (kind) {
+            case WELCOME -> GuildAuditEventType.WELCOME_TOGGLED;
+            case GOODBYE -> GuildAuditEventType.GOODBYE_TOGGLED;
+        };
     }
 
     private record Access(UUID registeredGuildId, String guildName, GuildMemberMessageView result) {

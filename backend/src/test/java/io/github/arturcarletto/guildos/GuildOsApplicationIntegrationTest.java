@@ -123,9 +123,19 @@ class GuildOsApplicationIntegrationTest {
                         )
                         """,
                 Boolean.class);
+        Boolean guildAuditEventsTableExists = jdbcTemplate.queryForObject(
+                """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = 'guild_os'
+                              AND table_name = 'guild_audit_events'
+                        )
+                        """,
+                Boolean.class);
         Integer successfulMigrations = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM guild_os.flyway_schema_history "
-                        + "WHERE version IN ('1', '2', '3', '4', '5', '6', '7') AND success",
+                        + "WHERE version IN ('1', '2', '3', '4', '5', '6', '7', '8', '9', '10') AND success",
                 Integer.class);
         String guildSettingsDeleteRule = jdbcTemplate.queryForObject(
                 """
@@ -162,7 +172,8 @@ class GuildOsApplicationIntegrationTest {
         assertThat(guildWelcomeConfigurationsTableExists).isFalse();
         assertThat(guildMemberMessageConfigurationsTableExists).isTrue();
         assertThat(discordGuildChannelsTableExists).isTrue();
-        assertThat(successfulMigrations).isEqualTo(7);
+        assertThat(guildAuditEventsTableExists).isTrue();
+        assertThat(successfulMigrations).isEqualTo(10);
         assertThat(guildSettingsDeleteRule).isEqualTo("NO ACTION");
         assertThat(guildMemberMessageDeleteRule).isEqualTo("NO ACTION");
         assertThat(disconnectedAtType).isEqualTo("timestamp with time zone");
