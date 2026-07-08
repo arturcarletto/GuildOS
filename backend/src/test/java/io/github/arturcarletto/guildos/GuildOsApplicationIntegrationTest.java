@@ -156,6 +156,8 @@ class GuildOsApplicationIntegrationTest {
         assertThat(guildMemberMessageDeleteRule).isEqualTo("NO ACTION");
         assertThat(disconnectedAtType).isEqualTo("timestamp with time zone");
         assertThat(applicationContext.containsBean("discordGateway")).isFalse();
+        // Telegram is disabled by default: no poller bean and no polling thread are created.
+        assertThat(applicationContext.containsBean("telegramUpdatePoller")).isFalse();
         assertThat(applicationContext.getBeansOfType(ClientRegistrationRepository.class)).isEmpty();
     }
 
