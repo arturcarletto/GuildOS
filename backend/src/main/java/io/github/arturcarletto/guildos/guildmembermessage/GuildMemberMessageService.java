@@ -52,7 +52,7 @@ public class GuildMemberMessageService {
         }
         Optional<StoredGuildMemberMessage> snapshot = store.find(access.registeredGuildId(), kind);
         try {
-            StoredGuildMemberMessage stored = snapshot
+            GuildMemberMessageMutationResult result = snapshot
                     .map(current -> store.configureExisting(
                             access.registeredGuildId(),
                             kind,
@@ -64,8 +64,10 @@ public class GuildMemberMessageService {
                             kind,
                             command.channelId(),
                             MemberMessageAppearanceFactory.forCreate(kind, command)));
-            auditRecorder.recordDiscordEvent(access.registeredGuildId(), configuredAuditEventType(kind));
-            return GuildMemberMessageView.configured(access.guildName(), stored);
+            if (result.changed()) {
+                auditRecorder.recordDiscordEvent(access.registeredGuildId(), configuredAuditEventType(kind));
+            }
+            return GuildMemberMessageView.configured(access.guildName(), result.stored());
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildMemberMessageConflictException();
         }
@@ -96,10 +98,12 @@ public class GuildMemberMessageService {
             return GuildMemberMessageView.notConfigured(kind, access.guildName());
         }
         try {
-            StoredGuildMemberMessage stored = store.toggleExisting(
+            GuildMemberMessageMutationResult result = store.toggleExisting(
                     access.registeredGuildId(), kind, snapshot.get().version());
-            auditRecorder.recordDiscordEvent(access.registeredGuildId(), toggledAuditEventType(kind));
-            return GuildMemberMessageView.configured(access.guildName(), stored);
+            if (result.changed()) {
+                auditRecorder.recordDiscordEvent(access.registeredGuildId(), toggledAuditEventType(kind));
+            }
+            return GuildMemberMessageView.configured(access.guildName(), result.stored());
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildMemberMessageConflictException();
         }

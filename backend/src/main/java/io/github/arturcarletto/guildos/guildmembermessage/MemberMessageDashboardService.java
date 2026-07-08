@@ -66,7 +66,7 @@ class MemberMessageDashboardService {
 
         Optional<StoredGuildMemberMessage> snapshot = store.find(access.registeredGuildId(), kind);
         try {
-            StoredGuildMemberMessage stored = snapshot
+            GuildMemberMessageMutationResult result = snapshot
                     .map(current -> store.configureExisting(
                             access.registeredGuildId(),
                             kind,
@@ -78,11 +78,13 @@ class MemberMessageDashboardService {
                             kind,
                             command.channelId(),
                             MemberMessageAppearanceFactory.forCreate(kind, command)));
-            auditRecorder.recordOperatorEvent(
-                    access.registeredGuildId(),
-                    operatorId,
-                    configuredAuditEventType(kind));
-            return MemberMessageConfigResponse.configured(stored);
+            if (result.changed()) {
+                auditRecorder.recordOperatorEvent(
+                        access.registeredGuildId(),
+                        operatorId,
+                        configuredAuditEventType(kind));
+            }
+            return MemberMessageConfigResponse.configured(result.stored());
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildMemberMessageConflictException();
         }
@@ -90,18 +92,34 @@ class MemberMessageDashboardService {
 
     @Transactional
     MemberMessageConfigResponse toggle(UUID operatorId, String discordGuildId, MemberMessageKind kind) {
+        return toggle(operatorId, discordGuildId, kind, Optional.empty());
+    }
+
+    @Transactional
+    MemberMessageConfigResponse toggle(
+            UUID operatorId,
+            String discordGuildId,
+            MemberMessageKind kind,
+            Optional<Boolean> targetEnabled) {
         AuthorizedGuildAccess access = authorizer.findActiveForUpdate(operatorId, discordGuildId)
                 .orElseThrow(MemberMessageAccessNotFoundException::new);
         StoredGuildMemberMessage snapshot = store.find(access.registeredGuildId(), kind)
                 .orElseThrow(MemberMessageNotConfiguredException::new);
         try {
-            StoredGuildMemberMessage stored =
-                    store.toggleExisting(access.registeredGuildId(), kind, snapshot.version());
-            auditRecorder.recordOperatorEvent(
-                    access.registeredGuildId(),
-                    operatorId,
-                    toggledAuditEventType(kind));
-            return MemberMessageConfigResponse.configured(stored);
+            GuildMemberMessageMutationResult result = targetEnabled
+                    .map(enabled -> store.setEnabledExisting(
+                            access.registeredGuildId(),
+                            kind,
+                            enabled,
+                            snapshot.version()))
+                    .orElseGet(() -> store.toggleExisting(access.registeredGuildId(), kind, snapshot.version()));
+            if (result.changed()) {
+                auditRecorder.recordOperatorEvent(
+                        access.registeredGuildId(),
+                        operatorId,
+                        toggledAuditEventType(kind));
+            }
+            return MemberMessageConfigResponse.configured(result.stored());
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildMemberMessageConflictException();
         }

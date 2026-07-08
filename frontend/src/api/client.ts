@@ -36,6 +36,7 @@ import type {
   MemberMessageConfig,
   MemberMessageKind,
   MemberMessagePreview,
+  ToggleMemberMessageRequest,
   UpdateGuildSettingsRequest,
   UpdateMemberMessageRequest,
 } from './types';
@@ -489,11 +490,15 @@ export const api = {
   toggleMemberMessageConfig(
     discordGuildId: string,
     kind: MemberMessageKind,
+    enabled?: boolean,
   ): Promise<MemberMessageConfig> {
+    const request: ToggleMemberMessageRequest | undefined =
+      enabled === undefined ? undefined : { enabled };
     return sendStateChanging(
       'POST',
       `${memberMessageUrl(discordGuildId, kind)}/toggle`,
       parseMemberMessageConfig,
+      request,
     );
   },
 

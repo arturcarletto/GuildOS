@@ -289,6 +289,76 @@ class GuildAuditLogHttpIntegrationTest {
     }
 
     @Test
+    void identicalWelcomeConfigureRequestDoesNotCreateDuplicateAuditEvent() throws Exception {
+        AuthenticatedOperator operator = authorize("welcome-noop");
+        RegisteredGuildView guild = registeredGuild();
+        clearAuditEvents();
+
+        clock.setInstant(INSTANT_A);
+        putMemberMessage(operator, "welcome", memberMessageBody("Welcome {member}", "Welcome to {server}"));
+        clock.setInstant(INSTANT_B);
+        putMemberMessage(operator, "welcome", memberMessageBody("Welcome {member}", "Welcome to {server}"));
+        clock.setInstant(INSTANT_C);
+        putMemberMessage(operator, "welcome", memberMessageBody("Welcome {member}", "Hello {member}"));
+
+        assertThat(auditTypesFor(guild.registeredGuildId()))
+                .containsExactly(
+                        "WELCOME_CONFIGURED:OPERATOR",
+                        "WELCOME_CONFIGURED:OPERATOR");
+    }
+
+    @Test
+    void identicalGoodbyeConfigureRequestDoesNotCreateDuplicateAuditEvent() throws Exception {
+        AuthenticatedOperator operator = authorize("goodbye-noop");
+        RegisteredGuildView guild = registeredGuild();
+        clearAuditEvents();
+
+        clock.setInstant(INSTANT_A);
+        putMemberMessage(operator, "goodbye", memberMessageBody("Goodbye {member}", "{member} left {server}"));
+        clock.setInstant(INSTANT_B);
+        putMemberMessage(operator, "goodbye", memberMessageBody("Goodbye {member}", "{member} left {server}"));
+        clock.setInstant(INSTANT_C);
+        putMemberMessage(operator, "goodbye", memberMessageBody("Goodbye {member}", "{member} is gone"));
+
+        assertThat(auditTypesFor(guild.registeredGuildId()))
+                .containsExactly(
+                        "GOODBYE_CONFIGURED:OPERATOR",
+                        "GOODBYE_CONFIGURED:OPERATOR");
+    }
+
+    @Test
+    void settingWelcomeToggleToAlreadyCurrentValueDoesNotCreateDuplicateAuditEvent() throws Exception {
+        AuthenticatedOperator operator = authorize("welcome-toggle-noop");
+        RegisteredGuildView guild = registeredGuild();
+        putMemberMessage(operator, "welcome", memberMessageBody("Welcome {member}", "Welcome to {server}"));
+        clearAuditEvents();
+
+        clock.setInstant(INSTANT_B);
+        setMemberMessageEnabled(operator, "welcome", false);
+        clock.setInstant(INSTANT_C);
+        setMemberMessageEnabled(operator, "welcome", false);
+
+        assertThat(auditTypesFor(guild.registeredGuildId()))
+                .containsExactly("WELCOME_TOGGLED:OPERATOR");
+    }
+
+    @Test
+    void settingGoodbyeToggleToAlreadyCurrentValueDoesNotCreateDuplicateAuditEvent() throws Exception {
+        AuthenticatedOperator operator = authorize("goodbye-toggle-noop");
+        RegisteredGuildView guild = registeredGuild();
+        putMemberMessage(operator, "goodbye", memberMessageBody("Goodbye {member}", "{member} left {server}"));
+        clearAuditEvents();
+
+        clock.setInstant(INSTANT_B);
+        setMemberMessageEnabled(operator, "goodbye", false);
+        clock.setInstant(INSTANT_C);
+        setMemberMessageEnabled(operator, "goodbye", false);
+
+        assertThat(auditTypesFor(guild.registeredGuildId()))
+                .containsExactly("GOODBYE_TOGGLED:OPERATOR");
+    }
+
+    @Test
     void channelMetadataSyncRecordsOnlyWhenActiveSupportedMetadataChanges() {
         RegisteredGuildView guild = connectGuild();
         clearAuditEvents();
@@ -363,6 +433,25 @@ class GuildAuditLogHttpIntegrationTest {
                         """,
                 String.class,
                 registeredGuildId);
+    }
+
+    private void putMemberMessage(AuthenticatedOperator operator, String kind, String body) throws Exception {
+        mockMvc.perform(put(memberMessageUrl(kind))
+                        .with(oauth2Login().oauth2User(operator))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+    }
+
+    private void setMemberMessageEnabled(AuthenticatedOperator operator, String kind, boolean enabled)
+            throws Exception {
+        mockMvc.perform(post(memberMessageUrl(kind) + "/toggle")
+                        .with(oauth2Login().oauth2User(operator))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":" + enabled + "}"))
+                .andExpect(status().isOk());
     }
 
     private static String auditUrl(String discordGuildId) {

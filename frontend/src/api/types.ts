@@ -168,6 +168,11 @@ export interface UpdateMemberMessageRequest {
   buttonUrl?: string;
 }
 
+/** Optional target body for `POST .../toggle`; omitted keeps the legacy flip behavior. */
+export interface ToggleMemberMessageRequest {
+  enabled?: boolean;
+}
+
 /** `POST .../preview` rendered result. Never sent to Discord. */
 export interface MemberMessagePreview {
   kind: 'WELCOME' | 'GOODBYE' | string;

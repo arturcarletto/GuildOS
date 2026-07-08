@@ -61,7 +61,7 @@ class GuildMemberMessageServiceTest {
         allowAccess();
         when(store.find(REGISTERED_GUILD_ID, KIND)).thenReturn(Optional.empty());
         when(store.createIfAbsent(eq(REGISTERED_GUILD_ID), eq(KIND), eq("100"), any()))
-                .thenReturn(stored(true, 0));
+                .thenReturn(GuildMemberMessageMutationResult.created(stored(true, 0)));
 
         GuildMemberMessageView view = service.configure(GUILD_ID, KIND, command());
 
@@ -76,13 +76,25 @@ class GuildMemberMessageServiceTest {
         allowAccess();
         when(store.find(REGISTERED_GUILD_ID, KIND)).thenReturn(Optional.of(stored(false, 4)));
         when(store.configureExisting(eq(REGISTERED_GUILD_ID), eq(KIND), eq("100"), any(), eq(4L)))
-                .thenReturn(stored(false, 4));
+                .thenReturn(GuildMemberMessageMutationResult.updated(stored(false, 5)));
 
         service.configure(GUILD_ID, KIND, command());
 
         verify(store).configureExisting(eq(REGISTERED_GUILD_ID), eq(KIND), eq("100"), any(), eq(4L));
         verify(auditRecorder).recordDiscordEvent(REGISTERED_GUILD_ID, GuildAuditEventType.WELCOME_CONFIGURED);
         verify(store, never()).createIfAbsent(any(), any(), anyString(), any());
+    }
+
+    @Test
+    void configureFromPresentSnapshotDoesNotAuditWhenStoreReportsUnchanged() {
+        allowAccess();
+        when(store.find(REGISTERED_GUILD_ID, KIND)).thenReturn(Optional.of(stored(false, 4)));
+        when(store.configureExisting(eq(REGISTERED_GUILD_ID), eq(KIND), eq("100"), any(), eq(4L)))
+                .thenReturn(GuildMemberMessageMutationResult.unchanged(stored(false, 4)));
+
+        service.configure(GUILD_ID, KIND, command());
+
+        verify(auditRecorder, never()).recordDiscordEvent(any(), any());
     }
 
     @Test
@@ -129,7 +141,8 @@ class GuildMemberMessageServiceTest {
     void togglePassesTheObservedVersion() {
         allowAccess();
         when(store.find(REGISTERED_GUILD_ID, KIND)).thenReturn(Optional.of(stored(true, 5)));
-        when(store.toggleExisting(REGISTERED_GUILD_ID, KIND, 5)).thenReturn(stored(false, 6));
+        when(store.toggleExisting(REGISTERED_GUILD_ID, KIND, 5))
+                .thenReturn(GuildMemberMessageMutationResult.disabled(stored(false, 6)));
 
         GuildMemberMessageView view = service.toggle(GUILD_ID, KIND);
 

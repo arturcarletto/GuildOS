@@ -177,7 +177,7 @@ function MemberMessageCard({
     setBusy('toggle');
     setFeedback(null);
     try {
-      const toggled = await api.toggleMemberMessageConfig(guildId, kind);
+      const toggled = await api.toggleMemberMessageConfig(guildId, kind, !enabled);
       config.setData(toggled);
       setForm(fromConfig(toggled));
       setFeedback({

@@ -212,6 +212,34 @@ describe('CSRF handling on state-changing requests', () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).isConflict).toBe(true);
   });
+
+  it('sends a target enabled value for idempotent member-message toggles', async () => {
+    fetchMock
+      .mockResolvedValueOnce(CSRF_RESPONSE)
+      .mockResolvedValueOnce(mockResponse({
+        json: {
+          kind: 'WELCOME',
+          configured: true,
+          enabled: false,
+          channelId: '123',
+          title: 'Welcome',
+          message: 'Hi',
+          color: '#57F287',
+          imageUrl: '',
+          footer: '',
+          includeBots: false,
+          mentionMember: true,
+          buttonLabel: '',
+          buttonUrl: '',
+        },
+      }));
+
+    await api.toggleMemberMessageConfig('9', 'welcome', false);
+
+    expect(urlOf(1)).toBe('/api/v1/guilds/9/member-messages/welcome/toggle');
+    expect(initOf(1).method).toBe('POST');
+    expect(initOf(1).body).toBe(JSON.stringify({ enabled: false }));
+  });
 });
 
 describe('getCsrfToken', () => {
