@@ -33,7 +33,7 @@ class GuildMemberMessageStore {
     }
 
     @Transactional
-    StoredGuildMemberMessage createIfAbsent(
+    GuildMemberMessageMutationResult createIfAbsent(
             UUID registeredGuildId,
             MemberMessageKind kind,
             String channelId,
@@ -57,11 +57,11 @@ class GuildMemberMessageStore {
         if (inserted == 0) {
             throw new GuildMemberMessageConflictException();
         }
-        return toStored(loadOrThrowConflict(registeredGuildId, kind));
+        return GuildMemberMessageMutationResult.created(toStored(loadOrThrowConflict(registeredGuildId, kind)));
     }
 
     @Transactional
-    StoredGuildMemberMessage configureExisting(
+    GuildMemberMessageMutationResult configureExisting(
             UUID registeredGuildId,
             MemberMessageKind kind,
             String channelId,
@@ -69,20 +69,40 @@ class GuildMemberMessageStore {
             long expectedVersion) {
         GuildMemberMessageConfiguration configuration =
                 loadAtExpectedVersion(registeredGuildId, kind, expectedVersion);
-        if (configuration.configure(channelId, appearance, clock.instant())) {
+        boolean changed = configuration.configure(channelId, appearance, clock.instant());
+        if (changed) {
             repository.flush();
         }
-        return toStored(configuration);
+        StoredGuildMemberMessage stored = toStored(configuration);
+        return changed
+                ? GuildMemberMessageMutationResult.updated(stored)
+                : GuildMemberMessageMutationResult.unchanged(stored);
     }
 
     @Transactional
-    StoredGuildMemberMessage toggleExisting(
+    GuildMemberMessageMutationResult toggleExisting(
             UUID registeredGuildId, MemberMessageKind kind, long expectedVersion) {
         GuildMemberMessageConfiguration configuration =
                 loadAtExpectedVersion(registeredGuildId, kind, expectedVersion);
         configuration.toggle(clock.instant());
         repository.flush();
-        return toStored(configuration);
+        return toggleResult(toStored(configuration));
+    }
+
+    @Transactional
+    GuildMemberMessageMutationResult setEnabledExisting(
+            UUID registeredGuildId,
+            MemberMessageKind kind,
+            boolean enabled,
+            long expectedVersion) {
+        GuildMemberMessageConfiguration configuration =
+                loadAtExpectedVersion(registeredGuildId, kind, expectedVersion);
+        boolean changed = configuration.setEnabled(enabled, clock.instant());
+        if (changed) {
+            repository.flush();
+        }
+        StoredGuildMemberMessage stored = toStored(configuration);
+        return changed ? toggleResult(stored) : GuildMemberMessageMutationResult.unchanged(stored);
     }
 
     private GuildMemberMessageConfiguration loadAtExpectedVersion(
@@ -107,5 +127,11 @@ class GuildMemberMessageStore {
                 configuration.getChannelId(),
                 configuration.toAppearance(),
                 configuration.getVersion());
+    }
+
+    private static GuildMemberMessageMutationResult toggleResult(StoredGuildMemberMessage stored) {
+        return stored.enabled()
+                ? GuildMemberMessageMutationResult.enabled(stored)
+                : GuildMemberMessageMutationResult.disabled(stored);
     }
 }

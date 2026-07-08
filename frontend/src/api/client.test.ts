@@ -99,6 +99,54 @@ describe('GET requests', () => {
     ]);
     expect((channels[0] as unknown as Record<string, unknown>).id).toBeUndefined();
   });
+
+  it('requests guild audit log filters and ignores internal event fields', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        json: {
+          guildId: '42',
+          events: [
+            {
+              id: 'internal-event-id',
+              registeredGuildId: 'internal-guild-id',
+              operatorId: 'internal-operator-id',
+              occurredAt: '2026-01-02T03:04:05Z',
+              eventType: 'WELCOME_CONFIGURED',
+              actorType: 'OPERATOR',
+              summary: 'Welcome message configuration was updated.',
+              targetType: 'WELCOME_MESSAGE',
+              targetLabel: 'Welcome automation',
+            },
+          ],
+        },
+      }),
+    );
+
+    const auditLog = await api.getGuildAuditLog('42', {
+      limit: 100,
+      eventType: 'WELCOME_CONFIGURED',
+      from: '2026-01-01T00:00:00Z',
+      to: '2026-01-03T00:00:00Z',
+    });
+
+    expect(urlOf(0)).toBe(
+      '/api/v1/guilds/42/audit-log?limit=100&eventType=WELCOME_CONFIGURED&from=2026-01-01T00%3A00%3A00Z&to=2026-01-03T00%3A00%3A00Z',
+    );
+    expect(auditLog).toEqual({
+      guildId: '42',
+      events: [
+        {
+          occurredAt: '2026-01-02T03:04:05Z',
+          eventType: 'WELCOME_CONFIGURED',
+          actorType: 'OPERATOR',
+          summary: 'Welcome message configuration was updated.',
+          targetType: 'WELCOME_MESSAGE',
+          targetLabel: 'Welcome automation',
+        },
+      ],
+    });
+    expect((auditLog.events[0] as unknown as Record<string, unknown>).operatorId).toBeUndefined();
+  });
 });
 
 describe('CSRF handling on state-changing requests', () => {
@@ -163,6 +211,34 @@ describe('CSRF handling on state-changing requests', () => {
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).isConflict).toBe(true);
+  });
+
+  it('sends a target enabled value for idempotent member-message toggles', async () => {
+    fetchMock
+      .mockResolvedValueOnce(CSRF_RESPONSE)
+      .mockResolvedValueOnce(mockResponse({
+        json: {
+          kind: 'WELCOME',
+          configured: true,
+          enabled: false,
+          channelId: '123',
+          title: 'Welcome',
+          message: 'Hi',
+          color: '#57F287',
+          imageUrl: '',
+          footer: '',
+          includeBots: false,
+          mentionMember: true,
+          buttonLabel: '',
+          buttonUrl: '',
+        },
+      }));
+
+    await api.toggleMemberMessageConfig('9', 'welcome', false);
+
+    expect(urlOf(1)).toBe('/api/v1/guilds/9/member-messages/welcome/toggle');
+    expect(initOf(1).method).toBe('POST');
+    expect(initOf(1).body).toBe(JSON.stringify({ enabled: false }));
   });
 });
 

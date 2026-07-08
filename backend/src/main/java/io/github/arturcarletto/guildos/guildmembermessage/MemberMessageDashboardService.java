@@ -8,6 +8,8 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.github.arturcarletto.guildos.guildaudit.GuildAuditEventType;
+import io.github.arturcarletto.guildos.guildaudit.GuildAuditRecorder;
 import io.github.arturcarletto.guildos.guildaccess.AuthorizedGuildAccess;
 import io.github.arturcarletto.guildos.guildaccess.GuildAccessAuthorizer;
 
@@ -32,10 +34,15 @@ class MemberMessageDashboardService {
 
     private final GuildAccessAuthorizer authorizer;
     private final GuildMemberMessageStore store;
+    private final GuildAuditRecorder auditRecorder;
 
-    MemberMessageDashboardService(GuildAccessAuthorizer authorizer, GuildMemberMessageStore store) {
+    MemberMessageDashboardService(
+            GuildAccessAuthorizer authorizer,
+            GuildMemberMessageStore store,
+            GuildAuditRecorder auditRecorder) {
         this.authorizer = authorizer;
         this.store = store;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional(readOnly = true)
@@ -59,7 +66,7 @@ class MemberMessageDashboardService {
 
         Optional<StoredGuildMemberMessage> snapshot = store.find(access.registeredGuildId(), kind);
         try {
-            StoredGuildMemberMessage stored = snapshot
+            GuildMemberMessageMutationResult result = snapshot
                     .map(current -> store.configureExisting(
                             access.registeredGuildId(),
                             kind,
@@ -71,7 +78,13 @@ class MemberMessageDashboardService {
                             kind,
                             command.channelId(),
                             MemberMessageAppearanceFactory.forCreate(kind, command)));
-            return MemberMessageConfigResponse.configured(stored);
+            if (result.changed()) {
+                auditRecorder.recordOperatorEvent(
+                        access.registeredGuildId(),
+                        operatorId,
+                        configuredAuditEventType(kind));
+            }
+            return MemberMessageConfigResponse.configured(result.stored());
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildMemberMessageConflictException();
         }
@@ -79,14 +92,34 @@ class MemberMessageDashboardService {
 
     @Transactional
     MemberMessageConfigResponse toggle(UUID operatorId, String discordGuildId, MemberMessageKind kind) {
+        return toggle(operatorId, discordGuildId, kind, Optional.empty());
+    }
+
+    @Transactional
+    MemberMessageConfigResponse toggle(
+            UUID operatorId,
+            String discordGuildId,
+            MemberMessageKind kind,
+            Optional<Boolean> targetEnabled) {
         AuthorizedGuildAccess access = authorizer.findActiveForUpdate(operatorId, discordGuildId)
                 .orElseThrow(MemberMessageAccessNotFoundException::new);
         StoredGuildMemberMessage snapshot = store.find(access.registeredGuildId(), kind)
                 .orElseThrow(MemberMessageNotConfiguredException::new);
         try {
-            StoredGuildMemberMessage stored =
-                    store.toggleExisting(access.registeredGuildId(), kind, snapshot.version());
-            return MemberMessageConfigResponse.configured(stored);
+            GuildMemberMessageMutationResult result = targetEnabled
+                    .map(enabled -> store.setEnabledExisting(
+                            access.registeredGuildId(),
+                            kind,
+                            enabled,
+                            snapshot.version()))
+                    .orElseGet(() -> store.toggleExisting(access.registeredGuildId(), kind, snapshot.version()));
+            if (result.changed()) {
+                auditRecorder.recordOperatorEvent(
+                        access.registeredGuildId(),
+                        operatorId,
+                        toggledAuditEventType(kind));
+            }
+            return MemberMessageConfigResponse.configured(result.stored());
         } catch (OptimisticLockingFailureException exception) {
             throw new GuildMemberMessageConflictException();
         }
@@ -116,5 +149,19 @@ class MemberMessageDashboardService {
             throw new InvalidMemberMessageConfigurationException(
                     "The channel id must be a Discord channel id (a numeric snowflake)");
         }
+    }
+
+    private static GuildAuditEventType configuredAuditEventType(MemberMessageKind kind) {
+        return switch (kind) {
+            case WELCOME -> GuildAuditEventType.WELCOME_CONFIGURED;
+            case GOODBYE -> GuildAuditEventType.GOODBYE_CONFIGURED;
+        };
+    }
+
+    private static GuildAuditEventType toggledAuditEventType(MemberMessageKind kind) {
+        return switch (kind) {
+            case WELCOME -> GuildAuditEventType.WELCOME_TOGGLED;
+            case GOODBYE -> GuildAuditEventType.GOODBYE_TOGGLED;
+        };
     }
 }

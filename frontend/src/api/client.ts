@@ -28,11 +28,15 @@ import type {
   CsrfToken,
   CurrentOperator,
   EligibleGuild,
+  GuildAuditEvent,
+  GuildAuditLog,
+  GuildAuditLogOptions,
   GuildChannelSummary,
   GuildSettings,
   MemberMessageConfig,
   MemberMessageKind,
   MemberMessagePreview,
+  ToggleMemberMessageRequest,
   UpdateGuildSettingsRequest,
   UpdateMemberMessageRequest,
 } from './types';
@@ -298,6 +302,34 @@ function parseGuildChannels(value: unknown): GuildChannelSummary[] {
   return asArray(source.channels, parseGuildChannelSummary);
 }
 
+function parseGuildAuditEvent(value: unknown): GuildAuditEvent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const occurredAt = asString(value.occurredAt);
+  const eventType = asString(value.eventType);
+  const actorType = asString(value.actorType);
+  if (!occurredAt || !eventType || !actorType) {
+    return null;
+  }
+  return {
+    occurredAt,
+    eventType,
+    actorType,
+    summary: asRequiredString(value.summary),
+    targetType: asString(value.targetType),
+    targetLabel: asString(value.targetLabel),
+  };
+}
+
+function parseGuildAuditLog(value: unknown): GuildAuditLog {
+  const source = isRecord(value) ? value : {};
+  return {
+    guildId: asRequiredString(source.guildId),
+    events: asArray(source.events, parseGuildAuditEvent),
+  };
+}
+
 function parseMemberMessageConfig(value: unknown): MemberMessageConfig {
   const source = isRecord(value) ? value : {};
   return {
@@ -335,6 +367,26 @@ function parseMemberMessagePreview(value: unknown): MemberMessagePreview {
 
 function memberMessageUrl(discordGuildId: string, kind: MemberMessageKind): string {
   return `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/member-messages/${kind}`;
+}
+
+function guildAuditLogUrl(discordGuildId: string, options: GuildAuditLogOptions = {}): string {
+  const query = new URLSearchParams();
+  if (options.limit !== undefined) {
+    query.set('limit', String(options.limit));
+  }
+  if (options.eventType) {
+    query.set('eventType', options.eventType);
+  }
+  if (options.from) {
+    query.set('from', options.from);
+  }
+  if (options.to) {
+    query.set('to', options.to);
+  }
+  const suffix = query.toString();
+  return `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/audit-log${
+    suffix ? `?${suffix}` : ''
+  }`;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +460,13 @@ export const api = {
     );
   },
 
+  getGuildAuditLog(
+    discordGuildId: string,
+    options: GuildAuditLogOptions = {},
+  ): Promise<GuildAuditLog> {
+    return getJson(guildAuditLogUrl(discordGuildId, options), parseGuildAuditLog);
+  },
+
   getMemberMessageConfig(
     discordGuildId: string,
     kind: MemberMessageKind,
@@ -431,11 +490,15 @@ export const api = {
   toggleMemberMessageConfig(
     discordGuildId: string,
     kind: MemberMessageKind,
+    enabled?: boolean,
   ): Promise<MemberMessageConfig> {
+    const request: ToggleMemberMessageRequest | undefined =
+      enabled === undefined ? undefined : { enabled };
     return sendStateChanging(
       'POST',
       `${memberMessageUrl(discordGuildId, kind)}/toggle`,
       parseMemberMessageConfig,
+      request,
     );
   },
 

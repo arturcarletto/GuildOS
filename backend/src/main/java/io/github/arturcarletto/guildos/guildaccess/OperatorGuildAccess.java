@@ -74,12 +74,13 @@ class OperatorGuildAccess {
         return OnboardingOutcome.UNCHANGED;
     }
 
-    void revoke(Instant now) {
+    boolean revoke(Instant now) {
         if (revokedAt != null) {
-            return;
+            return false;
         }
         revokedAt = Objects.requireNonNull(now, "now must not be null");
         updatedAt = now;
+        return true;
     }
 
     boolean isActive() {

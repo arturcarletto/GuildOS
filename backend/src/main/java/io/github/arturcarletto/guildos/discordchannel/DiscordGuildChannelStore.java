@@ -23,12 +23,16 @@ class DiscordGuildChannelStore {
     }
 
     @Transactional
-    void sync(String discordGuildId, List<DiscordGuildChannelSnapshot> snapshots, Instant syncedAt) {
+    boolean sync(String discordGuildId, List<DiscordGuildChannelSnapshot> snapshots, Instant syncedAt) {
         requireSnowflake(discordGuildId, "discordGuildId");
+        Map<String, ChannelState> before = activeState(discordGuildId);
         Map<String, DiscordGuildChannelSnapshot> unique = new LinkedHashMap<>();
         for (DiscordGuildChannelSnapshot snapshot : snapshots) {
             DiscordGuildChannelSnapshot normalized = normalize(snapshot);
             unique.put(normalized.discordChannelId(), normalized);
+        }
+        boolean changed = !before.equals(snapshotState(unique));
+        for (DiscordGuildChannelSnapshot normalized : unique.values()) {
             repository.upsertActive(
                     UUID.randomUUID(),
                     discordGuildId,
@@ -43,6 +47,7 @@ class DiscordGuildChannelStore {
         } else {
             repository.markMissingInactive(discordGuildId, unique.keySet(), syncedAt);
         }
+        return changed;
     }
 
     @Transactional(readOnly = true)
@@ -66,6 +71,29 @@ class DiscordGuildChannelStore {
                 snapshot.position());
     }
 
+    private Map<String, ChannelState> activeState(String discordGuildId) {
+        Map<String, ChannelState> state = new LinkedHashMap<>();
+        for (DiscordGuildChannel channel : repository.findActiveSupportedByDiscordGuildId(discordGuildId)) {
+            state.put(channel.getDiscordChannelId(), new ChannelState(
+                    channel.getName(),
+                    DiscordGuildChannelType.valueOf(channel.getType()),
+                    channel.getPosition() == null ? 0 : channel.getPosition()));
+        }
+        return state;
+    }
+
+    private static Map<String, ChannelState> snapshotState(
+            Map<String, DiscordGuildChannelSnapshot> snapshots) {
+        Map<String, ChannelState> state = new LinkedHashMap<>();
+        for (DiscordGuildChannelSnapshot snapshot : snapshots.values()) {
+            state.put(snapshot.discordChannelId(), new ChannelState(
+                    snapshot.name(),
+                    snapshot.type(),
+                    snapshot.position()));
+        }
+        return state;
+    }
+
     private static String normalizeName(String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("Discord channel name is required");
@@ -81,5 +109,8 @@ class DiscordGuildChannelStore {
         if (value == null || !SNOWFLAKE.matcher(value).matches()) {
             throw new IllegalArgumentException(fieldName + " must be a Discord snowflake");
         }
+    }
+
+    private record ChannelState(String name, DiscordGuildChannelType type, int position) {
     }
 }

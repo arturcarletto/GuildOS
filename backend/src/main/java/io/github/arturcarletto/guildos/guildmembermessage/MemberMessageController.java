@@ -1,5 +1,7 @@
 package io.github.arturcarletto.guildos.guildmembermessage;
 
+import java.util.Optional;
+
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,8 +53,13 @@ class MemberMessageController {
     MemberMessageConfigResponse toggle(
             @PathVariable String discordGuildId,
             @PathVariable String kind,
+            @RequestBody(required = false) ToggleMemberMessageRequest request,
             @AuthenticationPrincipal AuthenticatedOperator operator) {
-        return service.toggle(operator.operatorId(), discordGuildId, parseKind(kind));
+        return service.toggle(
+                operator.operatorId(),
+                discordGuildId,
+                parseKind(kind),
+                request == null ? Optional.empty() : request.targetEnabled());
     }
 
     @PostMapping("/{kind}/preview")

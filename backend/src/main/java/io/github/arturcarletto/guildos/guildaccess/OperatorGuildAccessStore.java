@@ -7,6 +7,9 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.github.arturcarletto.guildos.guildaudit.GuildAuditEventType;
+import io.github.arturcarletto.guildos.guildaudit.GuildAuditRecorder;
+
 /**
  * Owns the short transactional persistence of the operator-to-guild authorization.
  *
@@ -20,10 +23,15 @@ import org.springframework.transaction.annotation.Transactional;
 class OperatorGuildAccessStore {
 
     private final OperatorGuildAccessRepository repository;
+    private final GuildAuditRecorder auditRecorder;
     private final Clock clock;
 
-    OperatorGuildAccessStore(OperatorGuildAccessRepository repository, Clock clock) {
+    OperatorGuildAccessStore(
+            OperatorGuildAccessRepository repository,
+            GuildAuditRecorder auditRecorder,
+            Clock clock) {
         this.repository = repository;
+        this.auditRecorder = auditRecorder;
         this.clock = clock;
     }
 
@@ -37,13 +45,31 @@ class OperatorGuildAccessStore {
                 .findByOperatorIdAndRegisteredGuildIdForUpdate(operatorId, registeredGuildId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Authorization was not available after insert-if-absent"));
-        return inserted == 1 ? OnboardingOutcome.CREATED : access.onboard(role, now);
+        OnboardingOutcome outcome = inserted == 1 ? OnboardingOutcome.CREATED : access.onboard(role, now);
+        GuildAuditEventType auditEventType = auditEventType(outcome);
+        if (auditEventType != null) {
+            auditRecorder.recordOperatorEvent(registeredGuildId, operatorId, auditEventType);
+        }
+        return outcome;
     }
 
     @Transactional
     void revoke(UUID operatorId, UUID registeredGuildId) {
         Instant now = clock.instant();
         repository.findByOperatorIdAndRegisteredGuildIdForUpdate(operatorId, registeredGuildId)
-                .ifPresent(access -> access.revoke(now));
+                .filter(access -> access.revoke(now))
+                .ifPresent(access -> auditRecorder.recordOperatorEvent(
+                        registeredGuildId,
+                        operatorId,
+                        GuildAuditEventType.GUILD_ACCESS_REVOKED));
+    }
+
+    private static GuildAuditEventType auditEventType(OnboardingOutcome outcome) {
+        return switch (outcome) {
+            case CREATED -> GuildAuditEventType.GUILD_ONBOARDING_CREATED;
+            case REACTIVATED -> GuildAuditEventType.GUILD_ONBOARDING_REACTIVATED;
+            case ROLE_UPDATED -> GuildAuditEventType.GUILD_ACCESS_ROLE_UPDATED;
+            case UNCHANGED -> null;
+        };
     }
 }

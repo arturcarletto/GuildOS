@@ -160,7 +160,7 @@ describe('AutomationTab', () => {
     await user.click(within(welcome).getByRole('button', { name: 'Disable' }));
 
     await waitFor(() => {
-      expect(mockedApi.toggleMemberMessageConfig).toHaveBeenCalledWith('g1', 'welcome');
+      expect(mockedApi.toggleMemberMessageConfig).toHaveBeenCalledWith('g1', 'welcome', false);
     });
     expect(await within(welcome).findByText('Disabled.')).toBeInTheDocument();
   });

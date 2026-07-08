@@ -96,8 +96,16 @@ class GuildMemberMessageConfiguration {
 
     /** Flips the enabled state. Always a real change, so callers should flush and bump the version. */
     boolean toggle(Instant now) {
+        return setEnabled(!enabled, now);
+    }
+
+    /** Applies a target enabled state. Returns false when the row is already in that state. */
+    boolean setEnabled(boolean replacementEnabled, Instant now) {
         Objects.requireNonNull(now, "now must not be null");
-        enabled = !enabled;
+        if (enabled == replacementEnabled) {
+            return false;
+        }
+        enabled = replacementEnabled;
         updatedAt = now;
         return true;
     }
