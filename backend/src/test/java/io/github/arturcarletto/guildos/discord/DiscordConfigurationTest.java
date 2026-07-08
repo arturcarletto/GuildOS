@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
+import io.github.arturcarletto.guildos.discordchannel.DiscordGuildChannelSyncService;
 import io.github.arturcarletto.guildos.guildactivity.GuildActivityIngestionService;
 import io.github.arturcarletto.guildos.guildmembermessage.GuildMemberMessageService;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
@@ -26,6 +27,7 @@ class DiscordConfigurationTest {
             .withBean(GuildStatusService.class, () -> mock(GuildStatusService.class))
             .withBean(GuildMemberMessageService.class, () -> mock(GuildMemberMessageService.class))
             .withBean(GuildActivityIngestionService.class, () -> mock(GuildActivityIngestionService.class))
+            .withBean(DiscordGuildChannelSyncService.class, () -> mock(DiscordGuildChannelSyncService.class))
             .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
             .withBean(Clock.class, Clock::systemUTC);
 
@@ -44,6 +46,7 @@ class DiscordConfigurationTest {
                     assertThat(context).doesNotHaveBean(DiscordMemberLifecycleListener.class);
                     assertThat(context).doesNotHaveBean(DiscordGuildActivityListener.class);
                     assertThat(context).doesNotHaveBean(DiscordGuildCommandRegistrar.class);
+                    assertThat(context).doesNotHaveBean(DiscordGuildChannelCacheSync.class);
                     assertThat(context).doesNotHaveBean(DiscordCommandCatalog.class);
                 });
     }
@@ -66,6 +69,7 @@ class DiscordConfigurationTest {
                     assertThat(context).hasSingleBean(DiscordMemberMessageEmbedFactory.class);
                     assertThat(context).hasSingleBean(DiscordMemberMessageChannelResolver.class);
                     assertThat(context).hasSingleBean(DiscordMemberMessageDeliveryMetrics.class);
+                    assertThat(context).hasSingleBean(DiscordGuildChannelCacheSync.class);
                 });
     }
 

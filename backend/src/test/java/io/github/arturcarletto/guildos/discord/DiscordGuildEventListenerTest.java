@@ -25,8 +25,9 @@ class DiscordGuildEventListenerTest {
 
     private final GuildConnectionService service = mock(GuildConnectionService.class);
     private final DiscordGuildCommandRegistrar commandRegistrar = mock(DiscordGuildCommandRegistrar.class);
+    private final DiscordGuildChannelCacheSync channelCacheSync = mock(DiscordGuildChannelCacheSync.class);
     private final DiscordGuildEventListener listener =
-            new DiscordGuildEventListener(service, commandRegistrar);
+            new DiscordGuildEventListener(service, commandRegistrar, channelCacheSync);
 
     @Test
     void readySynchronizesEveryCurrentlyConnectedGuild() {
@@ -43,6 +44,8 @@ class DiscordGuildEventListenerTest {
         verify(service).connect(new ConnectGuildCommand("2002", "Second Guild"));
         verify(commandRegistrar).reconcile(firstGuild);
         verify(commandRegistrar).reconcile(secondGuild);
+        verify(channelCacheSync).sync(firstGuild);
+        verify(channelCacheSync).sync(secondGuild);
     }
 
     @Test
@@ -52,9 +55,10 @@ class DiscordGuildEventListenerTest {
 
         listener.onGuildJoin(new GuildJoinEvent(jda, 1, guild));
 
-        InOrder order = inOrder(service, commandRegistrar);
+        InOrder order = inOrder(service, commandRegistrar, channelCacheSync);
         order.verify(service).connect(new ConnectGuildCommand("2003", "Joined Guild"));
         order.verify(commandRegistrar).reconcile(guild);
+        order.verify(channelCacheSync).sync(guild);
     }
 
     @Test
@@ -66,6 +70,7 @@ class DiscordGuildEventListenerTest {
 
         verify(service).disconnect(new DisconnectGuildCommand("2004"));
         verify(commandRegistrar, never()).reconcile(guild);
+        verify(channelCacheSync, never()).sync(guild);
     }
 
     @Test
@@ -75,11 +80,13 @@ class DiscordGuildEventListenerTest {
         when(guild.updateCommands()).thenThrow(new IllegalStateException("sensitive upstream detail"));
         DiscordGuildEventListener listenerWithRealRegistrar = new DiscordGuildEventListener(
                 service,
-                new DiscordGuildCommandRegistrar(new DiscordCommandCatalog()));
+                new DiscordGuildCommandRegistrar(new DiscordCommandCatalog()),
+                channelCacheSync);
 
         assertThatCode(() -> listenerWithRealRegistrar.onGuildJoin(new GuildJoinEvent(jda, 1, guild)))
                 .doesNotThrowAnyException();
         verify(service).connect(new ConnectGuildCommand("2005", "Registration Failure Guild"));
+        verify(channelCacheSync).sync(guild);
     }
 
     private Guild guild(String id, String name) {

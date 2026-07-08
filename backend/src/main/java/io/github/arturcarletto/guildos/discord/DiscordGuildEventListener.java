@@ -14,12 +14,15 @@ final class DiscordGuildEventListener extends ListenerAdapter {
 
     private final GuildConnectionService guildConnectionService;
     private final DiscordGuildCommandRegistrar commandRegistrar;
+    private final DiscordGuildChannelCacheSync channelCacheSync;
 
     DiscordGuildEventListener(
             GuildConnectionService guildConnectionService,
-            DiscordGuildCommandRegistrar commandRegistrar) {
+            DiscordGuildCommandRegistrar commandRegistrar,
+            DiscordGuildChannelCacheSync channelCacheSync) {
         this.guildConnectionService = guildConnectionService;
         this.commandRegistrar = commandRegistrar;
+        this.channelCacheSync = channelCacheSync;
     }
 
     @Override
@@ -40,5 +43,6 @@ final class DiscordGuildEventListener extends ListenerAdapter {
     private void connect(Guild guild) {
         guildConnectionService.connect(new ConnectGuildCommand(guild.getId(), guild.getName()));
         commandRegistrar.reconcile(guild);
+        channelCacheSync.sync(guild);
     }
 }

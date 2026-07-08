@@ -113,6 +113,16 @@ class GuildOsApplicationIntegrationTest {
                         )
                         """,
                 Boolean.class);
+        Boolean discordGuildChannelsTableExists = jdbcTemplate.queryForObject(
+                """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = 'guild_os'
+                              AND table_name = 'discord_guild_channels'
+                        )
+                        """,
+                Boolean.class);
         Integer successfulMigrations = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM guild_os.flyway_schema_history "
                         + "WHERE version IN ('1', '2', '3', '4', '5', '6', '7') AND success",
@@ -151,6 +161,7 @@ class GuildOsApplicationIntegrationTest {
         // V7 evolved the single-purpose welcome table into the shared member-message table.
         assertThat(guildWelcomeConfigurationsTableExists).isFalse();
         assertThat(guildMemberMessageConfigurationsTableExists).isTrue();
+        assertThat(discordGuildChannelsTableExists).isTrue();
         assertThat(successfulMigrations).isEqualTo(7);
         assertThat(guildSettingsDeleteRule).isEqualTo("NO ACTION");
         assertThat(guildMemberMessageDeleteRule).isEqualTo("NO ACTION");

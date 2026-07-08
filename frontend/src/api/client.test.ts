@@ -68,6 +68,37 @@ describe('GET requests', () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).isUnauthorized).toBe(true);
   });
+
+  it('lists guild channels without exposing internal ids', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        json: {
+          channels: [
+            {
+              id: 'internal-id',
+              discordChannelId: '123456789012345678',
+              name: 'welcome',
+              type: 'TEXT',
+              displayName: '#welcome',
+            },
+          ],
+        },
+      }),
+    );
+
+    const channels = await api.listGuildChannels('42');
+
+    expect(urlOf(0)).toBe('/api/v1/guilds/42/channels');
+    expect(channels).toEqual([
+      {
+        discordChannelId: '123456789012345678',
+        name: 'welcome',
+        type: 'TEXT',
+        displayName: '#welcome',
+      },
+    ]);
+    expect((channels[0] as unknown as Record<string, unknown>).id).toBeUndefined();
+  });
 });
 
 describe('CSRF handling on state-changing requests', () => {

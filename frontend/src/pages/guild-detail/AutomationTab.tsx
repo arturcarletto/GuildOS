@@ -2,16 +2,20 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 import { ApiError, api } from '../../api/client';
 import type {
+  GuildChannelSummary,
   MemberMessageConfig,
   MemberMessageKind,
   MemberMessagePreview,
   UpdateMemberMessageRequest,
 } from '../../api/types';
 import { Banner, ErrorState, LoadingState } from '../../components/states';
-import { describeError, useAsync } from '../../hooks/useAsync';
+import { describeError, useAsync, type AsyncState } from '../../hooks/useAsync';
 
 /** Two automation cards — welcome and goodbye — that manage member-message configuration. */
 export default function AutomationTab({ guildId }: { guildId: string }) {
+  const loadChannels = useCallback(() => api.listGuildChannels(guildId), [guildId]);
+  const channels = useAsync<GuildChannelSummary[]>(loadChannels, [guildId]);
+
   return (
     <div>
       <div className="page-head" style={{ marginBottom: 8 }}>
@@ -24,8 +28,18 @@ export default function AutomationTab({ guildId }: { guildId: string }) {
       </div>
 
       <div className="stack" style={{ gap: 20 }}>
-        <MemberMessageCard guildId={guildId} kind="welcome" heading="Welcome message" />
-        <MemberMessageCard guildId={guildId} kind="goodbye" heading="Goodbye message" />
+        <MemberMessageCard
+          guildId={guildId}
+          kind="welcome"
+          heading="Welcome message"
+          channels={channels}
+        />
+        <MemberMessageCard
+          guildId={guildId}
+          kind="goodbye"
+          heading="Goodbye message"
+          channels={channels}
+        />
       </div>
     </div>
   );
@@ -117,10 +131,12 @@ function MemberMessageCard({
   guildId,
   kind,
   heading,
+  channels,
 }: {
   guildId: string;
   kind: MemberMessageKind;
   heading: string;
+  channels: AsyncState<GuildChannelSummary[]>;
 }) {
   const isWelcome = kind === 'welcome';
   const load = useCallback(() => api.getMemberMessageConfig(guildId, kind), [guildId, kind]);
@@ -239,25 +255,12 @@ function MemberMessageCard({
       ) : null}
 
       <form onSubmit={handleSave} className="stack" style={{ gap: 14 }}>
-        <div className="field">
-          <label className="field__label" htmlFor={`${kind}-channel`}>
-            Channel ID
-          </label>
-          <input
-            id={`${kind}-channel`}
-            className="input mono"
-            value={form.channelId}
-            onChange={(event) => update('channelId', event.target.value)}
-            placeholder="123456789012345678"
-            autoComplete="off"
-            spellCheck={false}
-            required
-          />
-          <span className="field__hint">
-            The Discord channel id where the message is posted. In Discord, enable Developer Mode and
-            use “Copy Channel ID”.
-          </span>
-        </div>
+        <ChannelField
+          id={`${kind}-channel`}
+          value={form.channelId}
+          channels={channels}
+          onChange={(channelId) => update('channelId', channelId)}
+        />
 
         <div className="field">
           <label className="field__label" htmlFor={`${kind}-title`}>
@@ -426,6 +429,130 @@ function MemberMessageCard({
       </form>
 
       {preview ? <PreviewCard kind={kind} preview={preview} /> : null}
+    </div>
+  );
+}
+
+function ChannelField({
+  id,
+  value,
+  channels,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  channels: AsyncState<GuildChannelSummary[]>;
+  onChange: (channelId: string) => void;
+}) {
+  const [manualMode, setManualMode] = useState(false);
+  const channelList = channels.data ?? [];
+  const trimmedValue = value.trim();
+  const selectedChannel = channelList.find((channel) => channel.discordChannelId === value);
+  const loaded = channels.data !== null;
+  const unavailable =
+    trimmedValue !== '' && loaded && !channels.error && selectedChannel === undefined;
+  const manualEntry = manualMode || Boolean(channels.error) || (loaded && channelList.length === 0);
+
+  if (manualEntry) {
+    return (
+      <div className="field">
+        {channels.error ? (
+          <div style={{ marginBottom: 10 }}>
+            <Banner tone="error">{describeError(channels.error)}</Banner>
+          </div>
+        ) : null}
+        {loaded && channelList.length === 0 && !channels.error ? (
+          <div style={{ marginBottom: 10 }}>
+            <Banner tone="info">No synced text or announcement channels are available.</Banner>
+          </div>
+        ) : null}
+        {manualMode && unavailable ? (
+          <div style={{ marginBottom: 10 }}>
+            <Banner tone="info">
+              The saved channel is not in the latest synced channel list.
+            </Banner>
+          </div>
+        ) : null}
+        <label className="field__label" htmlFor={id}>
+          Channel ID
+        </label>
+        <input
+          id={id}
+          className="input mono"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="123456789012345678"
+          autoComplete="off"
+          spellCheck={false}
+          required
+        />
+        <span className="field__hint">
+          Manual entry is available for fallback only. GuildOS still validates the channel before
+          delivery.
+        </span>
+      </div>
+    );
+  }
+
+  if (channels.loading && !loaded) {
+    return (
+      <div className="field">
+        <label className="field__label" htmlFor={id}>
+          Channel
+        </label>
+        <select id={id} className="select" value="" disabled>
+          <option>Loading channels...</option>
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <div className="field">
+      {unavailable ? (
+        <div style={{ marginBottom: 10 }}>
+          <Banner tone="info">
+            The saved channel is not in the latest synced text or announcement channel list. Choose
+            another channel or enter an ID manually.
+          </Banner>
+        </div>
+      ) : null}
+      <label className="field__label" htmlFor={id}>
+        Channel
+      </label>
+      <select
+        id={id}
+        className="select"
+        value={selectedChannel ? value : unavailable ? value : ''}
+        onChange={(event) => onChange(event.target.value)}
+        required
+      >
+        <option value="" disabled>
+          Select a channel
+        </option>
+        {unavailable ? (
+          <option value={value}>Saved channel {value} (unavailable)</option>
+        ) : null}
+        {channelList.map((channel) => (
+          <option key={channel.discordChannelId} value={channel.discordChannelId}>
+            {channel.displayName}
+          </option>
+        ))}
+      </select>
+      <span className="field__hint">
+        Synced text and announcement channels from Discord. Delivery permissions are checked again
+        when messages are sent.
+      </span>
+      {unavailable ? (
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          style={{ alignSelf: 'flex-start', marginTop: 8 }}
+          onClick={() => setManualMode(true)}
+        >
+          Enter ID manually
+        </button>
+      ) : null}
     </div>
   );
 }
