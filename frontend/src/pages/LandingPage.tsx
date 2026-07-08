@@ -48,6 +48,7 @@ export default function LandingPage() {
             <span className="hero__point">Discord OAuth sign-in</span>
             <span className="hero__point">Guild onboarding</span>
             <span className="hero__point">Timezone &amp; locale settings</span>
+            <span className="hero__point">Member timeouts</span>
             <span className="hero__point">Hourly activity analytics</span>
           </div>
 
@@ -66,7 +67,8 @@ export default function LandingPage() {
       </div>
 
       <footer className="landing__foot">
-        Guild OS · Real-time dashboards, moderation, AI, and billing are not implemented yet.
+        Guild OS · Real-time dashboards, advanced moderation workflows, AI, and billing are not
+        implemented yet.
       </footer>
     </div>
   );

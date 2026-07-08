@@ -15,6 +15,7 @@ import io.github.arturcarletto.guildos.guild.GuildConnectionService;
 import io.github.arturcarletto.guildos.guildactivity.GuildActivityIngestionService;
 import io.github.arturcarletto.guildos.discordchannel.DiscordGuildChannelSyncService;
 import io.github.arturcarletto.guildos.guildmembermessage.GuildMemberMessageService;
+import io.github.arturcarletto.guildos.guildmoderation.GuildModerationDiscordClient;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
 
 @Configuration(proxyBeanMethods = false)
@@ -132,6 +133,12 @@ class DiscordConfiguration {
     @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
     DiscordGateway discordGateway(DiscordProperties properties, DiscordJdaFactory jdaFactory) {
         return new DiscordGateway(properties, jdaFactory);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    GuildModerationDiscordClient guildModerationDiscordClient(DiscordGateway gateway) {
+        return new JdaGuildModerationDiscordClient(gateway);
     }
 
     @Bean("discord")

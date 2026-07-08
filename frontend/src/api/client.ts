@@ -25,6 +25,7 @@ import type {
   ActivityBucket,
   ActivitySummary,
   AuthorizedGuild,
+  CreateMemberTimeoutRequest,
   CsrfToken,
   CurrentOperator,
   EligibleGuild,
@@ -36,6 +37,7 @@ import type {
   MemberMessageConfig,
   MemberMessageKind,
   MemberMessagePreview,
+  ModerationActionResponse,
   ToggleMemberMessageRequest,
   UpdateGuildSettingsRequest,
   UpdateMemberMessageRequest,
@@ -365,6 +367,17 @@ function parseMemberMessagePreview(value: unknown): MemberMessagePreview {
   };
 }
 
+function parseModerationActionResponse(value: unknown): ModerationActionResponse {
+  const source = isRecord(value) ? value : {};
+  return {
+    guildId: asRequiredString(source.guildId),
+    actionType: asRequiredString(source.actionType),
+    targetUserId: asRequiredString(source.targetUserId),
+    durationMinutes: asNumber(source.durationMinutes),
+    status: asRequiredString(source.status),
+  };
+}
+
 function memberMessageUrl(discordGuildId: string, kind: MemberMessageKind): string {
   return `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/member-messages/${kind}`;
 }
@@ -511,6 +524,18 @@ export const api = {
       'POST',
       `${memberMessageUrl(discordGuildId, kind)}/preview`,
       parseMemberMessagePreview,
+      request,
+    );
+  },
+
+  createMemberTimeout(
+    discordGuildId: string,
+    request: CreateMemberTimeoutRequest,
+  ): Promise<ModerationActionResponse> {
+    return sendStateChanging(
+      'POST',
+      `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/moderation/timeout`,
+      parseModerationActionResponse,
       request,
     );
   },

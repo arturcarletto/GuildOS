@@ -173,6 +173,22 @@ export interface ToggleMemberMessageRequest {
   enabled?: boolean;
 }
 
+/** Body for creating a Discord member communication timeout. */
+export interface CreateMemberTimeoutRequest {
+  targetUserId: string;
+  durationMinutes: number;
+  reason?: string;
+}
+
+/** Safe response for a completed moderation action. No internal ids are exposed. */
+export interface ModerationActionResponse {
+  guildId: string;
+  actionType: string;
+  targetUserId: string;
+  durationMinutes: number;
+  status: string;
+}
+
 /** `POST .../preview` rendered result. Never sent to Discord. */
 export interface MemberMessagePreview {
   kind: 'WELCOME' | 'GOODBYE' | string;

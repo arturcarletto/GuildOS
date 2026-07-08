@@ -5,5 +5,6 @@ public enum GuildAuditTargetType {
     WELCOME_MESSAGE,
     GOODBYE_MESSAGE,
     CHANNEL_SYNC,
-    ONBOARDING
+    ONBOARDING,
+    MODERATION_ACTION
 }

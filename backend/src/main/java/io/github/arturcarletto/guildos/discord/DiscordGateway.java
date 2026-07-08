@@ -2,6 +2,7 @@ package io.github.arturcarletto.guildos.discord;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -142,6 +143,10 @@ final class DiscordGateway implements SmartLifecycle {
                 status == JDA.Status.CONNECTED,
                 status.name(),
                 current.getGuilds().size());
+    }
+
+    Optional<JDA> jda() {
+        return Optional.ofNullable(jda);
     }
 
     private void shutdownImmediately(JDA candidate) {

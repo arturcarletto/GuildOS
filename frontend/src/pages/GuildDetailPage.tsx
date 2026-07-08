@@ -10,15 +10,17 @@ import AccessTab from './guild-detail/AccessTab';
 import ActivityTab from './guild-detail/ActivityTab';
 import AuditLogTab from './guild-detail/AuditLogTab';
 import AutomationTab from './guild-detail/AutomationTab';
+import ModerationTab from './guild-detail/ModerationTab';
 import OverviewTab from './guild-detail/OverviewTab';
 import SettingsTab from './guild-detail/SettingsTab';
 
-type TabKey = 'overview' | 'settings' | 'automation' | 'activity' | 'audit' | 'access';
+type TabKey = 'overview' | 'settings' | 'automation' | 'moderation' | 'activity' | 'audit' | 'access';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'settings', label: 'Settings' },
   { key: 'automation', label: 'Automation' },
+  { key: 'moderation', label: 'Moderation' },
   { key: 'activity', label: 'Activity' },
   { key: 'audit', label: 'Audit Log' },
   { key: 'access', label: 'Access' },
@@ -89,6 +91,7 @@ export default function GuildDetailPage() {
       ) : null}
       {activeTab === 'settings' ? <SettingsTab guildId={discordGuildId} /> : null}
       {activeTab === 'automation' ? <AutomationTab guildId={discordGuildId} /> : null}
+      {activeTab === 'moderation' ? <ModerationTab guildId={discordGuildId} /> : null}
       {activeTab === 'activity' ? <ActivityTab guildId={discordGuildId} /> : null}
       {activeTab === 'audit' ? <AuditLogTab guildId={discordGuildId} /> : null}
       {activeTab === 'access' ? (
