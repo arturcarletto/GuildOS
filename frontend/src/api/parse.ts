@@ -30,6 +30,11 @@ export function asNumber(value: unknown, fallback = 0): number {
   return fallback;
 }
 
+/** Coerces a boolean field, defaulting to `fallback` for anything unexpected. */
+export function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 /** Maps an unknown array-like into a typed list, dropping entries the mapper rejects. */
 export function asArray<T>(value: unknown, map: (item: unknown) => T | null): T[] {
   if (!Array.isArray(value)) {

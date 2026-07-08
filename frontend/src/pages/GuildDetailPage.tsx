@@ -8,14 +8,16 @@ import { ErrorState, LoadingState } from '../components/states';
 import { describeError, useAsync } from '../hooks/useAsync';
 import AccessTab from './guild-detail/AccessTab';
 import ActivityTab from './guild-detail/ActivityTab';
+import AutomationTab from './guild-detail/AutomationTab';
 import OverviewTab from './guild-detail/OverviewTab';
 import SettingsTab from './guild-detail/SettingsTab';
 
-type TabKey = 'overview' | 'settings' | 'activity' | 'access';
+type TabKey = 'overview' | 'settings' | 'automation' | 'activity' | 'access';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'settings', label: 'Settings' },
+  { key: 'automation', label: 'Automation' },
   { key: 'activity', label: 'Activity' },
   { key: 'access', label: 'Access' },
 ];
@@ -84,6 +86,7 @@ export default function GuildDetailPage() {
         )
       ) : null}
       {activeTab === 'settings' ? <SettingsTab guildId={discordGuildId} /> : null}
+      {activeTab === 'automation' ? <AutomationTab guildId={discordGuildId} /> : null}
       {activeTab === 'activity' ? <ActivityTab guildId={discordGuildId} /> : null}
       {activeTab === 'access' ? (
         <AccessTab guildId={discordGuildId} guildName={guild.data?.name ?? null} />
