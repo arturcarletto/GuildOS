@@ -58,12 +58,28 @@ class DiscordOAuthConfigurationTest {
                 true,
                 "test-client",
                 "secret-value",
+                "",
                 "");
 
         assertThat(properties.toString())
                 .contains("enabled=true", "clientSecretConfigured=true")
                 .doesNotContain("secret-value");
         assertThat(properties.getRedirectUri()).isEqualTo(DiscordOAuthProperties.DEFAULT_REDIRECT_URI);
+    }
+
+    @Test
+    void successRedirectUriDefaultsToTheCurrentOperatorEndpoint() {
+        DiscordOAuthProperties defaults = new DiscordOAuthProperties(false, "", "", "", "");
+        assertThat(defaults.getSuccessRedirectUri()).isEqualTo("/api/v1/me");
+        assertThat(DiscordOAuthProperties.DEFAULT_SUCCESS_REDIRECT_URI).isEqualTo("/api/v1/me");
+
+        DiscordOAuthProperties overridden = new DiscordOAuthProperties(
+                true,
+                "test-client",
+                "test-secret",
+                "",
+                "http://localhost:5173/dashboard");
+        assertThat(overridden.getSuccessRedirectUri()).isEqualTo("http://localhost:5173/dashboard");
     }
 
     @Test

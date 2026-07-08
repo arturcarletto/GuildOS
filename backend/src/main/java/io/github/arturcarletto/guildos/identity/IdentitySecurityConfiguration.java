@@ -39,7 +39,7 @@ class IdentitySecurityConfiguration {
             DiscordOAuth2UserService oauth2UserService = oauth2UserServiceProvider.getObject();
             http.oauth2Login(oauth2 -> oauth2
                     .userInfoEndpoint(userInfo -> userInfo.userService(oauth2UserService))
-                    .defaultSuccessUrl("/api/v1/me", true));
+                    .defaultSuccessUrl(properties.getSuccessRedirectUri(), true));
         }
 
         return http.build();

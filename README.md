@@ -344,7 +344,13 @@ Never commit or share the client secret. With PostgreSQL running, start the back
 http://localhost:8080/oauth2/authorization/discord
 ```
 
-After Discord authentication, the backend redirects to `GET /api/v1/me`. That protected endpoint returns only the local operator ID and safe Discord profile fields. Discord access and refresh tokens are never stored in Guild OS domain tables, and OAuth tokens and client secrets are never exposed by any API. Authentication establishes operator identity; onboarding a guild to authorize its management is described in the next section.
+After Discord authentication, the backend redirects to a configurable success URL that defaults to `GET /api/v1/me`. That protected endpoint returns only the local operator ID and safe Discord profile fields. Discord access and refresh tokens are never stored in Guild OS domain tables, and OAuth tokens and client secrets are never exposed by any API. Authentication establishes operator identity; onboarding a guild to authorize its management is described in the next section.
+
+The post-login redirect is controlled by `guildos.identity.discord-oauth.success-redirect-uri` (environment variable `DISCORD_OAUTH_SUCCESS_REDIRECT_URI`). The default profile keeps the original `/api/v1/me` behavior, while the `local` profile points it at the operator dashboard on the Vite dev server (`http://localhost:5173/dashboard`) so a browser lands back in the dashboard after signing in. Set `DISCORD_OAUTH_SUCCESS_REDIRECT_URI` to override it for any environment:
+
+```bash
+export DISCORD_OAUTH_SUCCESS_REDIRECT_URI=http://localhost:5173/dashboard
+```
 
 Spring Security uses a server-side HTTP session. Logout uses `POST /logout` and requires the active CSRF token; successful logout returns HTTP 204. The current in-memory, single-instance session strategy must be revisited before horizontal scaling rather than adding distributed session storage prematurely.
 
@@ -480,7 +486,7 @@ The frontend relies entirely on the backend for authentication and authorization
 - The frontend then calls the authenticated `/api/**` endpoints with `credentials: "include"` so the session cookie is sent.
 - `GET` requests need no CSRF token. For `POST`, `PUT`, `DELETE`, and `POST /logout`, the client fetches the token from `GET /api/v1/csrf`, caches it in memory, and sends it using the returned `headerName`. A 403 triggers one automatic token refresh and retry.
 
-Because the registered Discord redirect URI points at `http://localhost:8080`, the OAuth handshake completes on the backend origin. After Discord authentication the backend redirects to `GET /api/v1/me` (JSON) on port 8080; return to `http://localhost:5173`, where the dashboard reads `GET /api/v1/me` through the proxy — the shared `localhost` session cookie keeps you signed in. Aligning the post-login redirect to the dashboard, or serving the built assets from Spring Boot, is a deliberate follow-up rather than a security shortcut.
+Because the registered Discord redirect URI points at `http://localhost:8080`, the OAuth handshake completes on the backend origin. Under the `local` profile the backend then redirects the browser to `http://localhost:5173/dashboard` (via `guildos.identity.discord-oauth.success-redirect-uri`, overridable with `DISCORD_OAUTH_SUCCESS_REDIRECT_URI`), so operators land back in the dashboard signed in through the shared `localhost` session cookie. The default profile keeps the original `/api/v1/me` behavior. Serving the built assets from Spring Boot in production remains a deliberate follow-up rather than a security shortcut.
 
 ### Frontend commands
 

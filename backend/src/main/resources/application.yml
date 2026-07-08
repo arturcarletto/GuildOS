@@ -32,6 +32,7 @@ guildos:
       client-id: ${DISCORD_OAUTH_CLIENT_ID:}
       client-secret: ${DISCORD_OAUTH_CLIENT_SECRET:}
       redirect-uri: ${DISCORD_OAUTH_REDIRECT_URI:}
+      success-redirect-uri: ${DISCORD_OAUTH_SUCCESS_REDIRECT_URI:/api/v1/me}
 
 management:
   endpoint:

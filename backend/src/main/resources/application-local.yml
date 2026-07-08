@@ -4,3 +4,11 @@ spring:
     username: ${DB_USERNAME:guildos_app}
     password: ${DB_PASSWORD:guildos_local}
 
+guildos:
+  identity:
+    discord-oauth:
+      # Local development runs the operator dashboard on the Vite dev server. After a successful
+      # Discord login the backend sends the browser back to the dashboard instead of the JSON
+      # /api/v1/me endpoint. Override with DISCORD_OAUTH_SUCCESS_REDIRECT_URI when needed.
+      success-redirect-uri: ${DISCORD_OAUTH_SUCCESS_REDIRECT_URI:http://localhost:5173/dashboard}
+
