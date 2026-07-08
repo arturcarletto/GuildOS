@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
+import io.github.arturcarletto.guildos.guildactivity.GuildActivityIngestionService;
 import io.github.arturcarletto.guildos.guildmembermessage.GuildMemberMessageService;
 import io.github.arturcarletto.guildos.guildstatus.GuildStatusService;
 
@@ -88,24 +89,34 @@ class DiscordConfiguration {
 
     @Bean
     @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
+    DiscordGuildActivityListener discordGuildActivityListener(
+            GuildActivityIngestionService ingestionService,
+            Clock clock) {
+        return new DiscordGuildActivityListener(ingestionService, clock);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "guildos.discord.enabled", havingValue = "true")
     DiscordJdaFactory discordJdaFactory(
             DiscordGuildEventListener guildEventListener,
             DiscordSlashCommandListener slashCommandListener,
             DiscordMemberMessageCommandListener memberMessageCommandListener,
-            DiscordMemberLifecycleListener memberLifecycleListener) {
+            DiscordMemberLifecycleListener memberLifecycleListener,
+            DiscordGuildActivityListener guildActivityListener) {
         return token -> JDABuilder.createLight(token, gatewayIntents())
                 .setAutoReconnect(true)
                 .addEventListeners(
                         guildEventListener,
                         slashCommandListener,
                         memberMessageCommandListener,
-                        memberLifecycleListener)
+                        memberLifecycleListener,
+                        guildActivityListener)
                 .build();
     }
 
     static EnumSet<GatewayIntent> gatewayIntents() {
-        // GUILD_MEMBERS (a privileged intent) is required to receive member join and remove events.
-        return EnumSet.of(GatewayIntent.GUILD_MEMBERS);
+        // GUILD_MEMBERS is privileged. GUILD_MESSAGES is standard and does not grant content.
+        return EnumSet.of(GatewayIntent.GUILD_MEMBERS, GatewayIntent.GUILD_MESSAGES);
     }
 
     @Bean
