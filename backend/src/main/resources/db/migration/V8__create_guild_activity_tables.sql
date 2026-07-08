@@ -123,9 +123,6 @@ CREATE TABLE guild_os.guild_activity_hourly (
         )
 );
 
-CREATE INDEX guild_activity_hourly_guild_bucket_idx
-    ON guild_os.guild_activity_hourly (guild_id, bucket_start);
-
 CREATE TABLE guild_os.guild_activity_hourly_members (
     guild_id UUID NOT NULL,
     bucket_start TIMESTAMP WITH TIME ZONE NOT NULL,

@@ -35,6 +35,59 @@ final class DiscordGuildActivityListener extends ListenerAdapter {
 
     @Override
     public void onGuildMemberJoin(GuildMemberJoinEvent event) {
+        try {
+            handleGuildMemberJoin(event);
+        } catch (RuntimeException failure) {
+            logFailure(GuildActivityEventType.MEMBER_JOINED, null, null, null, failure);
+        }
+    }
+
+    @Override
+    public void onGuildMemberRemove(GuildMemberRemoveEvent event) {
+        try {
+            handleGuildMemberRemove(event);
+        } catch (RuntimeException failure) {
+            logFailure(GuildActivityEventType.MEMBER_LEFT, null, null, null, failure);
+        }
+    }
+
+    @Override
+    public void onMessageReceived(MessageReceivedEvent event) {
+        try {
+            handleMessageReceived(event);
+        } catch (RuntimeException failure) {
+            logFailure(GuildActivityEventType.MESSAGE_CREATED, null, null, null, failure);
+        }
+    }
+
+    @Override
+    public void onMessageUpdate(MessageUpdateEvent event) {
+        try {
+            handleMessageUpdate(event);
+        } catch (RuntimeException failure) {
+            logFailure(GuildActivityEventType.MESSAGE_EDITED, null, null, null, failure);
+        }
+    }
+
+    @Override
+    public void onMessageDelete(MessageDeleteEvent event) {
+        try {
+            handleMessageDelete(event);
+        } catch (RuntimeException failure) {
+            logFailure(GuildActivityEventType.MESSAGE_DELETED, null, null, null, failure);
+        }
+    }
+
+    @Override
+    public void onMessageBulkDelete(MessageBulkDeleteEvent event) {
+        try {
+            handleMessageBulkDelete(event);
+        } catch (RuntimeException failure) {
+            logFailure(GuildActivityEventType.MESSAGE_DELETED, null, null, null, failure);
+        }
+    }
+
+    private void handleGuildMemberJoin(GuildMemberJoinEvent event) {
         Instant capturedAt = clock.instant();
         Guild guild = event.getGuild();
         Member member = event.getMember();
@@ -57,8 +110,7 @@ final class DiscordGuildActivityListener extends ListenerAdapter {
                 IngestGuildActivityCommand.SCHEMA_VERSION), null);
     }
 
-    @Override
-    public void onGuildMemberRemove(GuildMemberRemoveEvent event) {
+    private void handleGuildMemberRemove(GuildMemberRemoveEvent event) {
         Instant occurredAt = clock.instant();
         Guild guild = event.getGuild();
         User user = event.getUser();
@@ -79,8 +131,7 @@ final class DiscordGuildActivityListener extends ListenerAdapter {
                 IngestGuildActivityCommand.SCHEMA_VERSION), null);
     }
 
-    @Override
-    public void onMessageReceived(MessageReceivedEvent event) {
+    private void handleMessageReceived(MessageReceivedEvent event) {
         if (!event.isFromGuild()) {
             return;
         }
@@ -99,8 +150,7 @@ final class DiscordGuildActivityListener extends ListenerAdapter {
                 IngestGuildActivityCommand.SCHEMA_VERSION), event);
     }
 
-    @Override
-    public void onMessageUpdate(MessageUpdateEvent event) {
+    private void handleMessageUpdate(MessageUpdateEvent event) {
         if (!event.isFromGuild()) {
             return;
         }
@@ -119,8 +169,7 @@ final class DiscordGuildActivityListener extends ListenerAdapter {
                 IngestGuildActivityCommand.SCHEMA_VERSION), event);
     }
 
-    @Override
-    public void onMessageDelete(MessageDeleteEvent event) {
+    private void handleMessageDelete(MessageDeleteEvent event) {
         if (!event.isFromGuild()) {
             return;
         }
@@ -139,8 +188,7 @@ final class DiscordGuildActivityListener extends ListenerAdapter {
                 IngestGuildActivityCommand.SCHEMA_VERSION), event);
     }
 
-    @Override
-    public void onMessageBulkDelete(MessageBulkDeleteEvent event) {
+    private void handleMessageBulkDelete(MessageBulkDeleteEvent event) {
         Instant occurredAt = clock.instant();
         String guildId = snowflake(event.getGuild().getIdLong());
         String channelId = snowflake(event.getChannel().getIdLong());
@@ -166,14 +214,7 @@ final class DiscordGuildActivityListener extends ListenerAdapter {
         try {
             ingestionService.ingest(command);
         } catch (RuntimeException failure) {
-            logger.warn(
-                    "Discord activity ingestion failed: eventType={}, guildId={}, channelId={}, "
-                            + "messageId={}, failureCategory={}",
-                    command.eventType(),
-                    guildId,
-                    channelId == null ? "none" : channelId,
-                    messageId == null ? "none" : messageId,
-                    failureCategory(failure));
+            logFailure(command.eventType(), guildId, channelId, messageId, failure);
         }
     }
 
@@ -196,6 +237,22 @@ final class DiscordGuildActivityListener extends ListenerAdapter {
     private static String failureCategory(Throwable failure) {
         String category = failure.getClass().getSimpleName();
         return category == null || category.isBlank() ? "UnknownFailure" : category;
+    }
+
+    private static void logFailure(
+            GuildActivityEventType eventType,
+            String guildId,
+            String channelId,
+            String messageId,
+            Throwable failure) {
+        logger.warn(
+                "Discord activity ingestion failed: eventType={}, guildId={}, channelId={}, "
+                        + "messageId={}, failureCategory={}",
+                eventType,
+                guildId == null ? "unknown" : guildId,
+                channelId == null ? "none" : channelId,
+                messageId == null ? "none" : messageId,
+                failureCategory(failure));
     }
 
     private static String snowflake(long value) {

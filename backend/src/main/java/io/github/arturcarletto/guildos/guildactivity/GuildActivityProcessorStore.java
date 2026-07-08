@@ -16,11 +16,11 @@ import org.springframework.transaction.annotation.Transactional;
 class GuildActivityProcessorStore {
 
     private final JdbcTemplate jdbcTemplate;
-    private final GuildActivityProjectionStore projectionStore;
+    private final GuildActivityProjectionWriter projectionWriter;
 
-    GuildActivityProcessorStore(JdbcTemplate jdbcTemplate, GuildActivityProjectionStore projectionStore) {
+    GuildActivityProcessorStore(JdbcTemplate jdbcTemplate, GuildActivityProjectionWriter projectionWriter) {
         this.jdbcTemplate = jdbcTemplate;
-        this.projectionStore = projectionStore;
+        this.projectionWriter = projectionWriter;
     }
 
     @Transactional
@@ -29,7 +29,7 @@ class GuildActivityProcessorStore {
         return jdbcTemplate.query(
                 """
                 WITH candidates AS (
-                    SELECT id
+                    SELECT id, processing_status = 'PROCESSING' AS stale_reclaimed
                     FROM guild_os.guild_activity_events
                     WHERE (
                         processing_status = 'PENDING'
@@ -50,7 +50,8 @@ class GuildActivityProcessorStore {
                 WHERE events.id = candidates.id
                 RETURNING events.id, events.event_type, events.guild_id, events.subject_discord_id,
                     events.channel_discord_id, events.actor_discord_user_id, events.actor_is_bot,
-                    events.occurred_at, events.locked_at, events.attempt_count
+                    events.occurred_at, events.locked_at, events.attempt_count,
+                    candidates.stale_reclaimed
                 """,
                 GuildActivityProcessorStore::mapSnapshot,
                 Timestamp.from(now),
@@ -60,11 +61,12 @@ class GuildActivityProcessorStore {
     }
 
     @Transactional
-    boolean applyProjectionAndMarkProcessed(GuildActivityEventSnapshot event, Instant processedAt) {
+    GuildActivityProcessingResult applyProjectionAndMarkProcessed(
+            GuildActivityEventSnapshot event, Instant processedAt) {
         if (!lockActiveClaim(event)) {
-            return false;
+            return GuildActivityProcessingResult.CLAIM_LOST;
         }
-        projectionStore.apply(event, processedAt);
+        projectionWriter.apply(event, processedAt);
         int updated = jdbcTemplate.update(
                 """
                 UPDATE guild_os.guild_activity_events
@@ -86,11 +88,11 @@ class GuildActivityProcessorStore {
         if (updated != 1) {
             throw new IllegalStateException("Activity event claim was lost before processed mark");
         }
-        return true;
+        return GuildActivityProcessingResult.PROCESSED;
     }
 
     @Transactional
-    boolean recordFailure(
+    GuildActivityFailureResult recordFailure(
             GuildActivityEventSnapshot event,
             String failureCategory,
             Instant now,
@@ -118,7 +120,10 @@ class GuildActivityProcessorStore {
                 event.id(),
                 event.attemptCount(),
                 Timestamp.from(event.lockedAt()));
-        return dead && updated == 1;
+        if (updated != 1) {
+            return GuildActivityFailureResult.CLAIM_LOST;
+        }
+        return dead ? GuildActivityFailureResult.DEAD : GuildActivityFailureResult.RETRY_SCHEDULED;
     }
 
     private boolean lockActiveClaim(GuildActivityEventSnapshot event) {
@@ -167,6 +172,7 @@ class GuildActivityProcessorStore {
                 (Boolean) rs.getObject("actor_is_bot"),
                 rs.getTimestamp("occurred_at").toInstant(),
                 rs.getTimestamp("locked_at").toInstant(),
-                rs.getInt("attempt_count"));
+                rs.getInt("attempt_count"),
+                rs.getBoolean("stale_reclaimed"));
     }
 }

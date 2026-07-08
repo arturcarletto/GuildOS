@@ -243,9 +243,9 @@ The stored metadata is limited to:
 
 Guild OS never reads, stores, hashes, serializes, logs, or exposes message text, embed content, attachment names or URLs, component custom ids, sticker names, poll answers, usernames, display names, guild names, or channel names as activity payload data. The `guild_activity_events` table has no JSON, TEXT, BYTEA, content, or payload column. Metrics use only bounded low-cardinality tags such as event type and outcome; no guild, channel, message, user, URL, or exception message is used as a metric tag.
 
-PostgreSQL is the durable queue for this stage. Gateway callbacks perform one short transactional insert into `guild_os.guild_activity_events` using `INSERT ... ON CONFLICT (source_event_id) DO NOTHING`, so duplicate source events are successful no-ops. A scheduled processor claims bounded batches with `FOR UPDATE SKIP LOCKED`, marks rows `PROCESSING`, increments `attempt_count`, and then processes each row in its own transaction. Projection updates and marking an inbox row `PROCESSED` commit atomically. Failures roll back the projection transaction, then a separate short transaction stores only a bounded failure category and either reschedules the row with capped exponential backoff or marks it `DEAD` after the maximum attempts. Stale `PROCESSING` locks are reclaimable, so a worker crash does not permanently block the row.
+PostgreSQL is the durable queue for this stage. Gateway callbacks perform one short transactional insert into `guild_os.guild_activity_events` using `INSERT ... ON CONFLICT (source_event_id) DO NOTHING`, so duplicate source events are successful no-ops. A scheduled processor claims bounded batches with `FOR UPDATE SKIP LOCKED`, marks rows `PROCESSING`, increments `attempt_count`, and then processes each row in its own transaction. Projection updates and marking an inbox row `PROCESSED` commit atomically. Failures roll back the projection transaction, then a separate short transaction stores only a bounded failure category and either reschedules the row with capped exponential backoff or marks it `DEAD` after the maximum attempts. Stale `PROCESSING` locks are reclaimable only when the claim query detects an expired lock, so a worker crash does not permanently block the row. A lost claim is recorded separately from retries and dead-lettering.
 
-Hourly analytics are stored in UTC in `guild_os.guild_activity_hourly`. Counters include created messages, distinct edited messages, deleted messages, member joins, member leaves, human messages, bot messages, active members, and active channels. Companion uniqueness tables keep hourly active member/channel counts idempotent under retries and concurrent workers. This is at-least-once processing with idempotent projection; it is not claimed to be exactly once. Member-left source ids are best-effort deduplicated from the captured event time plus guild/user ids because Discord does not provide a native leave event id.
+Hourly analytics are stored as complete UTC-hour buckets in `guild_os.guild_activity_hourly`. Counters include created messages, distinct edited messages, deleted messages, member joins, member leaves, human messages, bot messages, active members, and active channels. Companion uniqueness tables keep hourly active member/channel counts idempotent under retries and concurrent workers. This is at-least-once processing with idempotent projection; it is not claimed to be exactly once. Member-left source ids are best-effort deduplicated from the captured event time plus guild/user ids because Discord does not provide a native leave event id.
 
 Read activity analytics with an authenticated session:
 
@@ -253,7 +253,7 @@ Read activity analytics with an authenticated session:
 GET /api/v1/guilds/{discordGuildId}/analytics/activity?from=2026-07-03T00:00:00Z&to=2026-07-04T00:00:00Z
 ```
 
-`from` is inclusive, `to` is exclusive, and both must be ISO-8601 instants. The maximum range is 31 days. Missing guilds, missing access, and revoked access all return the same non-enumerating JSON `404`. A valid request with no data returns zero summary values and an empty bucket array. Responses never expose internal guild UUIDs, inbox event ids, processing status, retry/failure details, raw user/channel/message ids, operator data, OAuth data, sessions, or tokens.
+`from` is inclusive, `to` is exclusive, and both must be ISO-8601 instants exactly aligned to UTC hour boundaries, such as `2026-07-03T10:00:00Z`. Values like `10:30:00Z`, `10:00:01Z`, or nanosecond offsets are rejected with JSON `400` rather than rounded or truncated. The endpoint returns complete hourly buckets only and has no partial-hour precision. The maximum range is 31 days. Missing guilds, missing access, and revoked access all return the same non-enumerating JSON `404`. A valid request with no data returns zero summary values and an empty bucket array. Responses never expose internal guild UUIDs, inbox event ids, processing status, retry/failure details, raw user/channel/message ids, operator data, OAuth data, sessions, or tokens.
 
 Example response shape:
 
@@ -289,6 +289,8 @@ export GUILDOS_ACTIVITY_PROCESSING_INITIAL_RETRY_DELAY_MS=1000
 export GUILDOS_ACTIVITY_PROCESSING_MAX_RETRY_DELAY_MS=60000
 export GUILDOS_ACTIVITY_PROCESSING_STALE_LOCK_TIMEOUT_MS=300000
 ```
+
+Processing metrics are emitted on `guildos.activity.processing` with bounded `event_type` and `outcome` tags only. Outcomes are `processed`, `retry_scheduled`, `dead`, `claim_lost`, and `stale_reclaimed`; `stale_reclaimed` is emitted only when a claim actually recovered a previously expired `PROCESSING` row.
 
 Manual verification in a test guild:
 

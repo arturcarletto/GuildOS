@@ -33,21 +33,25 @@ public class GuildActivityProcessor {
                 claimTime,
                 Duration.ofMillis(properties.getStaleLockTimeoutMs()));
         for (GuildActivityEventSnapshot event : events) {
+            if (event.staleReclaimed()) {
+                metrics.recordProcessing(event.eventType(), "stale_reclaimed", Duration.ZERO);
+            }
             process(event);
         }
         return events.size();
     }
 
-    private void process(GuildActivityEventSnapshot event) {
+    void process(GuildActivityEventSnapshot event) {
         Instant started = clock.instant();
         try {
-            boolean processed = store.applyProjectionAndMarkProcessed(event, clock.instant());
+            GuildActivityProcessingResult result =
+                    store.applyProjectionAndMarkProcessed(event, clock.instant());
             metrics.recordProcessing(
                     event.eventType(),
-                    processed ? "processed" : "stale_reclaimed",
+                    result == GuildActivityProcessingResult.PROCESSED ? "processed" : "claim_lost",
                     Duration.between(started, clock.instant()));
         } catch (RuntimeException failure) {
-            boolean dead = store.recordFailure(
+            GuildActivityFailureResult result = store.recordFailure(
                     event,
                     failureCategory(failure),
                     clock.instant(),
@@ -56,9 +60,17 @@ public class GuildActivityProcessor {
                     Duration.ofMillis(properties.getMaxRetryDelayMs()));
             metrics.recordProcessing(
                     event.eventType(),
-                    dead ? "dead" : "retry_scheduled",
+                    failureOutcome(result),
                     Duration.between(started, clock.instant()));
         }
+    }
+
+    private static String failureOutcome(GuildActivityFailureResult result) {
+        return switch (result) {
+            case RETRY_SCHEDULED -> "retry_scheduled";
+            case DEAD -> "dead";
+            case CLAIM_LOST -> "claim_lost";
+        };
     }
 
     private static String failureCategory(Throwable failure) {

@@ -15,7 +15,9 @@ import net.dv8tion.jda.api.entities.channel.unions.MessageChannelUnion;
 import net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent;
 import net.dv8tion.jda.api.events.guild.member.GuildMemberRemoveEvent;
 import net.dv8tion.jda.api.events.message.MessageBulkDeleteEvent;
+import net.dv8tion.jda.api.events.message.MessageDeleteEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
+import net.dv8tion.jda.api.events.message.MessageUpdateEvent;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -25,10 +27,12 @@ import io.github.arturcarletto.guildos.guildactivity.GuildActivityIngestionServi
 import io.github.arturcarletto.guildos.guildactivity.IngestGuildActivityCommand;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -94,6 +98,34 @@ class DiscordGuildActivityListenerTest {
     }
 
     @Test
+    void systemMemberJoinIsIgnoredWithoutIngestion() {
+        GuildMemberJoinEvent event = mock(GuildMemberJoinEvent.class);
+        Guild guild = guild();
+        Member member = mock(Member.class);
+        User user = user(false, true);
+        when(event.getGuild()).thenReturn(guild);
+        when(event.getMember()).thenReturn(member);
+        when(member.getUser()).thenReturn(user);
+
+        listener.onGuildMemberJoin(event);
+
+        verify(ingestionService, never()).ingest(any());
+    }
+
+    @Test
+    void systemMemberRemovalIsIgnoredWithoutIngestion() {
+        GuildMemberRemoveEvent event = mock(GuildMemberRemoveEvent.class);
+        Guild guild = guild();
+        User user = user(false, true);
+        when(event.getGuild()).thenReturn(guild);
+        when(event.getUser()).thenReturn(user);
+
+        listener.onGuildMemberRemove(event);
+
+        verify(ingestionService, never()).ingest(any());
+    }
+
+    @Test
     void messageCreatedMapsIdsAndDoesNotReadMessageContent() {
         MessageReceivedEvent event = mock(MessageReceivedEvent.class);
         Message message = mock(Message.class);
@@ -122,8 +154,13 @@ class DiscordGuildActivityListenerTest {
         assertThat(command.actorBot()).isFalse();
         assertThat(command.occurredAt()).isEqualTo(createdAt.toInstant());
         verify(message, never()).getContentRaw();
+        verify(message, never()).getContentDisplay();
+        verify(message, never()).getContentStripped();
         verify(message, never()).getEmbeds();
         verify(message, never()).getAttachments();
+        verify(message, never()).getComponents();
+        verify(message, never()).getStickers();
+        verify(message, never()).getPoll();
     }
 
     @Test
@@ -160,6 +197,38 @@ class DiscordGuildActivityListenerTest {
     }
 
     @Test
+    void messageUpdateMapsStableCommandWithoutActor() {
+        MessageUpdateEvent event = messageUpdateEvent();
+
+        listener.onMessageUpdate(event);
+
+        IngestGuildActivityCommand command = capturedCommand();
+        assertThat(command.eventType()).isEqualTo(GuildActivityEventType.MESSAGE_EDITED);
+        assertThat(command.sourceEventId()).isEqualTo("MESSAGE_EDITED:" + GUILD_ID + ":" + MESSAGE_ID);
+        assertThat(command.subjectDiscordId()).isEqualTo(MESSAGE_ID);
+        assertThat(command.channelDiscordId()).isEqualTo(CHANNEL_ID);
+        assertThat(command.actorDiscordUserId()).isNull();
+        assertThat(command.actorBot()).isNull();
+        assertThat(command.occurredAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void messageDeleteMapsStableCommandWithoutActor() {
+        MessageDeleteEvent event = messageDeleteEvent();
+
+        listener.onMessageDelete(event);
+
+        IngestGuildActivityCommand command = capturedCommand();
+        assertThat(command.eventType()).isEqualTo(GuildActivityEventType.MESSAGE_DELETED);
+        assertThat(command.sourceEventId()).isEqualTo("MESSAGE_DELETED:" + GUILD_ID + ":" + MESSAGE_ID);
+        assertThat(command.subjectDiscordId()).isEqualTo(MESSAGE_ID);
+        assertThat(command.channelDiscordId()).isEqualTo(CHANNEL_ID);
+        assertThat(command.actorDiscordUserId()).isNull();
+        assertThat(command.actorBot()).isNull();
+        assertThat(command.occurredAt()).isEqualTo(NOW);
+    }
+
+    @Test
     void bulkDeleteCreatesOneDeletedEventPerMessageId() {
         MessageBulkDeleteEvent event = mock(MessageBulkDeleteEvent.class);
         GuildMessageChannelUnion channel = mock(GuildMessageChannelUnion.class);
@@ -186,6 +255,25 @@ class DiscordGuildActivityListenerTest {
     }
 
     @Test
+    void bulkDeleteContinuesAfterIndividualIngestionFailure() {
+        MessageBulkDeleteEvent event = mock(MessageBulkDeleteEvent.class);
+        GuildMessageChannelUnion channel = mock(GuildMessageChannelUnion.class);
+        Guild guild = guild();
+        when(event.getGuild()).thenReturn(guild);
+        when(event.getChannel()).thenReturn(channel);
+        when(channel.getIdLong()).thenReturn(CHANNEL_ID_LONG);
+        when(event.getMessageIds()).thenReturn(List.of("700000000000000001", "700000000000000002"));
+        doThrow(new IllegalStateException("database down"))
+                .doReturn(GuildActivityIngestionResult.INSERTED)
+                .when(ingestionService)
+                .ingest(any());
+
+        listener.onMessageBulkDelete(event);
+
+        verify(ingestionService, times(2)).ingest(any());
+    }
+
+    @Test
     void ingestionResultsAndFailuresDoNotEscapeJdaDispatch() {
         MessageReceivedEvent ignored = messageReceivedEvent();
         when(ingestionService.ingest(any())).thenReturn(GuildActivityIngestionResult.IGNORED_NOT_ONBOARDED);
@@ -194,6 +282,16 @@ class DiscordGuildActivityListenerTest {
         MessageReceivedEvent failing = messageReceivedEvent();
         doThrow(new IllegalStateException("database down")).when(ingestionService).ingest(any());
         listener.onMessageReceived(failing);
+    }
+
+    @Test
+    void mappingFailuresDoNotEscapeJdaDispatch() {
+        MessageUpdateEvent event = mock(MessageUpdateEvent.class);
+        when(event.isFromGuild()).thenThrow(new IllegalStateException("mapping failed"));
+
+        assertThatCode(() -> listener.onMessageUpdate(event)).doesNotThrowAnyException();
+
+        verify(ingestionService, never()).ingest(any());
     }
 
     private IngestGuildActivityCommand capturedCommand() {
@@ -218,6 +316,30 @@ class DiscordGuildActivityListenerTest {
         when(event.isWebhookMessage()).thenReturn(false);
         when(event.getMessage()).thenReturn(message);
         when(message.getTimeCreated()).thenReturn(OffsetDateTime.parse("2026-07-02T23:59:00Z"));
+        return event;
+    }
+
+    private MessageUpdateEvent messageUpdateEvent() {
+        MessageUpdateEvent event = mock(MessageUpdateEvent.class);
+        MessageChannelUnion channel = mock(MessageChannelUnion.class);
+        Guild guild = guild();
+        when(event.isFromGuild()).thenReturn(true);
+        when(event.getGuild()).thenReturn(guild);
+        when(event.getMessageId()).thenReturn(MESSAGE_ID);
+        when(event.getChannel()).thenReturn(channel);
+        when(channel.getIdLong()).thenReturn(CHANNEL_ID_LONG);
+        return event;
+    }
+
+    private MessageDeleteEvent messageDeleteEvent() {
+        MessageDeleteEvent event = mock(MessageDeleteEvent.class);
+        MessageChannelUnion channel = mock(MessageChannelUnion.class);
+        Guild guild = guild();
+        when(event.isFromGuild()).thenReturn(true);
+        when(event.getGuild()).thenReturn(guild);
+        when(event.getMessageId()).thenReturn(MESSAGE_ID);
+        when(event.getChannel()).thenReturn(channel);
+        when(channel.getIdLong()).thenReturn(CHANNEL_ID_LONG);
         return event;
     }
 

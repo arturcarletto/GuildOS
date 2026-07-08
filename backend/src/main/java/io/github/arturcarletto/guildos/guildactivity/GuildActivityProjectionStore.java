@@ -8,7 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-class GuildActivityProjectionStore {
+class GuildActivityProjectionStore implements GuildActivityProjectionWriter {
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -16,7 +16,8 @@ class GuildActivityProjectionStore {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    void apply(GuildActivityEventSnapshot event, Instant updatedAt) {
+    @Override
+    public void apply(GuildActivityEventSnapshot event, Instant updatedAt) {
         Instant bucketStart = event.occurredAt().truncatedTo(ChronoUnit.HOURS);
         ensureBucket(event, bucketStart, updatedAt);
         switch (event.eventType()) {

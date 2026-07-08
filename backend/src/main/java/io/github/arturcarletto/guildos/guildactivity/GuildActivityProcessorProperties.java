@@ -1,5 +1,6 @@
 package io.github.arturcarletto.guildos.guildactivity;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -89,5 +90,10 @@ class GuildActivityProcessorProperties {
 
     public void setStaleLockTimeoutMs(long staleLockTimeoutMs) {
         this.staleLockTimeoutMs = staleLockTimeoutMs;
+    }
+
+    @AssertTrue(message = "guildos.activity.processing.max-retry-delay-ms must be greater than or equal to initial-retry-delay-ms")
+    public boolean isMaxRetryDelayAtLeastInitialRetryDelay() {
+        return maxRetryDelayMs >= initialRetryDelayMs;
     }
 }

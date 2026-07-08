@@ -13,5 +13,6 @@ record GuildActivityEventSnapshot(
         Boolean actorBot,
         Instant occurredAt,
         Instant lockedAt,
-        int attemptCount) {
+        int attemptCount,
+        boolean staleReclaimed) {
 }

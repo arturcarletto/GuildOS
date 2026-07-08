@@ -2,6 +2,7 @@ package io.github.arturcarletto.guildos.guildactivity;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -45,8 +46,15 @@ class GuildActivityAnalyticsService {
         if (from == null || to == null || !from.isBefore(to)) {
             throw new InvalidGuildActivityAnalyticsRequestException("invalid activity analytics time range");
         }
+        if (!isUtcHourBoundary(from) || !isUtcHourBoundary(to)) {
+            throw new InvalidGuildActivityAnalyticsRequestException("activity analytics range must align to UTC hours");
+        }
         if (Duration.between(from, to).compareTo(MAX_RANGE) > 0) {
             throw new InvalidGuildActivityAnalyticsRequestException("activity analytics range is too large");
         }
+    }
+
+    private static boolean isUtcHourBoundary(Instant instant) {
+        return instant.equals(instant.truncatedTo(ChronoUnit.HOURS));
     }
 }

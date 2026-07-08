@@ -200,11 +200,35 @@ class GuildActivityAnalyticsHttpIntegrationTest {
         assertBadRequest(operator, "not-a-snowflake", "2026-07-03T10:00:00Z", "2026-07-03T11:00:00Z");
         assertBadRequest(operator, GUILD_ID, "2026-07-03T11:00:00Z", "2026-07-03T10:00:00Z");
         assertBadRequest(operator, GUILD_ID, "2026-07-03T10:00:00Z", "2026-08-04T10:00:00Z");
+        assertBadRequest(operator, GUILD_ID, "2026-07-03T10:30:00Z", "2026-07-03T11:00:00Z");
+        assertBadRequest(operator, GUILD_ID, "2026-07-03T10:00:01Z", "2026-07-03T11:00:00Z");
+        assertBadRequest(operator, GUILD_ID, "2026-07-03T10:00:00.000000001Z", "2026-07-03T11:00:00Z");
 
         mockMvc.perform(get("/api/v1/guilds/" + GUILD_ID + "/analytics/activity?from=not-an-instant&to=2026-07-03T11:00:00Z")
                         .with(oauth2Login().oauth2User(operator)))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("{\"error\":\"bad_request\"}"));
+    }
+
+    @Test
+    void exactHourBoundariesAndThirtyOneDayRangeAreAccepted() throws Exception {
+        AuthenticatedOperator operator = onboardedOperator("aligned-range");
+
+        mockMvc.perform(get(activityUrl(
+                        GUILD_ID,
+                        "2026-07-03T10:00:00Z",
+                        "2026-07-03T11:00:00Z"))
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.buckets", hasSize(0)));
+
+        mockMvc.perform(get(activityUrl(
+                        GUILD_ID,
+                        "2026-07-03T00:00:00Z",
+                        "2026-08-03T00:00:00Z"))
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.buckets", hasSize(0)));
     }
 
     private void assertBadRequest(
