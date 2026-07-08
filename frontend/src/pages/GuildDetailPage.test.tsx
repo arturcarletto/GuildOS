@@ -15,6 +15,7 @@ vi.mock('../api/client', async () => {
       listAuthorizedGuilds: vi.fn(),
       listGuildChannels: vi.fn(),
       getMemberMessageConfig: vi.fn(),
+      createMemberTimeout: vi.fn(),
     },
   };
 });
@@ -71,5 +72,16 @@ describe('GuildDetailPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Welcome message' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Goodbye message' })).toBeInTheDocument();
+  });
+
+  it('exposes a Moderation tab with the timeout form', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const moderationTab = await screen.findByRole('tab', { name: 'Moderation' });
+    await user.click(moderationTab);
+
+    expect(await screen.findByRole('heading', { name: 'Member timeout' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Target Discord user ID')).toBeInTheDocument();
   });
 });

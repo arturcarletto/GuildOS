@@ -40,7 +40,11 @@ public enum GuildAuditEventType {
     CHANNEL_METADATA_SYNCED(
             "Discord channel metadata was refreshed.",
             GuildAuditTargetType.CHANNEL_SYNC,
-            "Channel metadata");
+            "Channel metadata"),
+    MEMBER_TIMEOUT_CREATED(
+            "Member timeout was created.",
+            GuildAuditTargetType.MODERATION_ACTION,
+            "Member timeout");
 
     private final String summary;
     private final GuildAuditTargetType targetType;

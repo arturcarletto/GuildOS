@@ -240,6 +240,43 @@ describe('CSRF handling on state-changing requests', () => {
     expect(initOf(1).method).toBe('POST');
     expect(initOf(1).body).toBe(JSON.stringify({ enabled: false }));
   });
+
+  it('creates member timeouts through the moderation endpoint', async () => {
+    fetchMock
+      .mockResolvedValueOnce(CSRF_RESPONSE)
+      .mockResolvedValueOnce(mockResponse({
+        json: {
+          guildId: '9',
+          actionType: 'MEMBER_TIMEOUT',
+          targetUserId: '123456789012345678',
+          durationMinutes: 10,
+          status: 'SUCCEEDED',
+          operatorId: 'internal-operator',
+        },
+      }));
+
+    const response = await api.createMemberTimeout('9', {
+      targetUserId: '123456789012345678',
+      durationMinutes: 10,
+      reason: 'Repeated spam',
+    });
+
+    expect(urlOf(1)).toBe('/api/v1/guilds/9/moderation/timeout');
+    expect(initOf(1).method).toBe('POST');
+    expect(initOf(1).body).toBe(JSON.stringify({
+      targetUserId: '123456789012345678',
+      durationMinutes: 10,
+      reason: 'Repeated spam',
+    }));
+    expect(response).toEqual({
+      guildId: '9',
+      actionType: 'MEMBER_TIMEOUT',
+      targetUserId: '123456789012345678',
+      durationMinutes: 10,
+      status: 'SUCCEEDED',
+    });
+    expect((response as unknown as Record<string, unknown>).operatorId).toBeUndefined();
+  });
 });
 
 describe('getCsrfToken', () => {
