@@ -37,6 +37,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oauth2Login;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -87,6 +88,7 @@ class GuildModerationHttpIntegrationTest {
         accessFixture.clear();
         reset(discordClient);
         when(discordClient.timeoutMember(any())).thenReturn(ModerationActionResult.success());
+        when(discordClient.searchMembers(any())).thenReturn(MemberSearchResult.empty());
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .apply(springSecurity())
                 .build();
@@ -215,6 +217,155 @@ class GuildModerationHttpIntegrationTest {
         assertThat(auditRowsFor(guild.registeredGuildId())).isEmpty();
     }
 
+    @Test
+    void unauthenticatedSearchReturnsJsonUnauthorized() throws Exception {
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "art"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(content().json("{\"error\":\"unauthorized\"}"));
+    }
+
+    @Test
+    void searchMissingAndUnauthorizedAccessReturnSafeNotFound() throws Exception {
+        AuthenticatedOperator authorized = authorize("s-auth");
+        AuthenticatedOperator stranger = newOperator("s-strange");
+
+        mockMvc.perform(get(searchUrl(MISSING_GUILD_ID)).param("query", "art")
+                        .with(oauth2Login().oauth2User(authorized)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\":\"not_found\"}"));
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "art")
+                        .with(oauth2Login().oauth2User(stranger)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\":\"not_found\"}"));
+    }
+
+    @Test
+    void searchBlankShortAndOverlongQueryReturnBadRequest() throws Exception {
+        AuthenticatedOperator operator = authorize("s-valid");
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "  ")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"))
+                .andExpect(jsonPath("$.message").value("Search query is required."));
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "a")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"))
+                .andExpect(jsonPath("$.message").value("Search query must be at least 2 characters."));
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "a".repeat(65))
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"))
+                .andExpect(jsonPath("$.message").value("Search query must be 64 characters or fewer."));
+    }
+
+    @Test
+    void searchShortNumericQueriesReturnBadRequestAndNeverReachDiscord() throws Exception {
+        AuthenticatedOperator operator = authorize("s-numeric");
+
+        for (String partialId : new String[] {"1", "12", "300000000000000"}) {
+            mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", partialId)
+                            .with(oauth2Login().oauth2User(operator)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("bad_request"))
+                    .andExpect(jsonPath("$.message")
+                            .value("Numeric search must be a full Discord user id (17-20 digits)."));
+        }
+
+        verify(discordClient, org.mockito.Mockito.never()).searchMembers(any());
+    }
+
+    @Test
+    void searchMissingQueryParameterReturnsBadRequest() throws Exception {
+        AuthenticatedOperator operator = authorize("s-missing");
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"));
+    }
+
+    @Test
+    void searchCapsLimitAndDefaultsToTen() throws Exception {
+        AuthenticatedOperator operator = authorize("s-limit");
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "art").param("limit", "100")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.limit").value(25))
+                .andExpect(jsonPath("$.results", hasSize(0)));
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "art")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.limit").value(10));
+
+        ArgumentCaptor<MemberSearchQuery> query = ArgumentCaptor.forClass(MemberSearchQuery.class);
+        verify(discordClient, org.mockito.Mockito.atLeastOnce()).searchMembers(query.capture());
+        assertThat(query.getAllValues().get(0).limit()).isEqualTo(25);
+    }
+
+    @Test
+    void searchReturnsEmptyResultsAndWritesNoAuditEvent() throws Exception {
+        AuthenticatedOperator operator = authorize("s-empty");
+        RegisteredGuildView guild = registeredGuild();
+        clearAuditEvents();
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "nomatch")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.*", hasSize(4)))
+                .andExpect(jsonPath("$.guildId").value(GUILD_ID))
+                .andExpect(jsonPath("$.query").value("nomatch"))
+                .andExpect(jsonPath("$.limit").value(10))
+                .andExpect(jsonPath("$.results", hasSize(0)));
+
+        assertThat(auditRowsFor(guild.registeredGuildId())).isEmpty();
+    }
+
+    @Test
+    void searchMapsResultsWithoutExposingInternalFields() throws Exception {
+        AuthenticatedOperator operator = authorize("s-map");
+        RegisteredGuildView guild = registeredGuild();
+        clearAuditEvents();
+        when(discordClient.searchMembers(any())).thenReturn(new MemberSearchResult(List.of(
+                new MemberSearchResultMember(TARGET_USER_ID, "some_user", "Some User", false))));
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", "some")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results", hasSize(1)))
+                .andExpect(jsonPath("$.results[0].*", hasSize(4)))
+                .andExpect(jsonPath("$.results[0].userId").value(TARGET_USER_ID))
+                .andExpect(jsonPath("$.results[0].username").value("some_user"))
+                .andExpect(jsonPath("$.results[0].displayName").value("Some User"))
+                .andExpect(jsonPath("$.results[0].bot").value(false))
+                .andExpect(jsonPath("$.results[0].registeredGuildId").doesNotExist())
+                .andExpect(jsonPath("$.results[0].operatorId").doesNotExist())
+                .andExpect(jsonPath("$.results[0].role").doesNotExist());
+
+        assertThat(auditRowsFor(guild.registeredGuildId())).isEmpty();
+    }
+
+    @Test
+    void searchExactSnowflakeUsesExactIdLookupPath() throws Exception {
+        AuthenticatedOperator operator = authorize("s-exact");
+
+        mockMvc.perform(get(searchUrl(GUILD_ID)).param("query", TARGET_USER_ID)
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.query").value(TARGET_USER_ID));
+
+        ArgumentCaptor<MemberSearchQuery> query = ArgumentCaptor.forClass(MemberSearchQuery.class);
+        verify(discordClient).searchMembers(query.capture());
+        assertThat(query.getValue().exactIdLookup()).isTrue();
+        assertThat(query.getValue().query()).isEqualTo(TARGET_USER_ID);
+    }
+
     private AuthenticatedOperator authorize(String suffix) {
         AuthenticatedOperator operator = newOperator(suffix);
         RegisteredGuildView guild = connectGuild();
@@ -257,6 +408,10 @@ class GuildModerationHttpIntegrationTest {
 
     private static String url(String discordGuildId) {
         return "/api/v1/guilds/" + discordGuildId + "/moderation/timeout";
+    }
+
+    private static String searchUrl(String discordGuildId) {
+        return "/api/v1/guilds/" + discordGuildId + "/moderation/members/search";
     }
 
     private static String validBody() {

@@ -189,6 +189,25 @@ export interface ModerationActionResponse {
   status: string;
 }
 
+/**
+ * A single member returned by a live moderation search. These fields are transient selection
+ * metadata resolved from Discord at request time; Guild OS does not persist them.
+ */
+export interface MemberSearchResultMember {
+  userId: string;
+  username: string | null;
+  displayName: string | null;
+  bot: boolean;
+}
+
+/** `GET /api/v1/guilds/{id}/moderation/members/search` — live, non-persisted member lookup. */
+export interface MemberSearchResponse {
+  guildId: string;
+  query: string;
+  limit: number;
+  results: MemberSearchResultMember[];
+}
+
 /** `POST .../preview` rendered result. Never sent to Discord. */
 export interface MemberMessagePreview {
   kind: 'WELCOME' | 'GOODBYE' | string;
