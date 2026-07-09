@@ -108,7 +108,7 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
         <h2 className="section__title">Moderation</h2>
         <p className="section__subtitle">
           Apply a Discord member timeout through the bot and record the successful action in the
-          audit log.
+          privacy-safe moderation case history and audit log.
         </p>
       </div>
 
@@ -268,7 +268,7 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
 
           <div className="row-between">
             <span className="field__hint">
-              Audit log summaries stay generic and never include the reason.
+              Case history and audit log summaries stay generic and never include the reason.
             </span>
             <button type="submit" className="btn btn--primary" disabled={submitting}>
               {submitting ? 'Applying...' : 'Apply timeout'}

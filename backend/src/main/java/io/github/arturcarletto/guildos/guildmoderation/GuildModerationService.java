@@ -88,10 +88,10 @@ class GuildModerationService {
         if (limit == null) {
             return DEFAULT_CASE_LIMIT;
         }
-        if (limit < 1) {
+        if (limit < 1 || limit > MAX_CASE_LIMIT) {
             throw new InvalidModerationActionException("Moderation case filters are invalid.");
         }
-        return Math.min(limit, MAX_CASE_LIMIT);
+        return limit;
     }
 
     private static ModerationCaseActionType resolveActionType(String actionType) {

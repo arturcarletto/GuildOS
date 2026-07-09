@@ -148,6 +148,8 @@ class GuildModerationServiceTest {
     void listCasesValidatesFiltersBeforeReadingHistory() {
         assertThatThrownBy(() -> service.listCases(OPERATOR_ID, GUILD_ID, 0, null, null, null))
                 .isInstanceOf(InvalidModerationActionException.class);
+        assertThatThrownBy(() -> service.listCases(OPERATOR_ID, GUILD_ID, 101, null, null, null))
+                .isInstanceOf(InvalidModerationActionException.class);
         assertThatThrownBy(() -> service.listCases(OPERATOR_ID, GUILD_ID, null, "UNKNOWN", null, null))
                 .isInstanceOf(InvalidModerationActionException.class);
 

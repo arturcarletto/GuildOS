@@ -303,10 +303,6 @@ class GuildModerationHttpIntegrationTest {
                 .andExpect(jsonPath("$.cases", hasSize(1)))
                 .andExpect(jsonPath("$.cases[0].targetUserId").value(TARGET_USER_ID));
 
-        mockMvc.perform(get(casesUrl(GUILD_ID)).param("limit", "250")
-                        .with(oauth2Login().oauth2User(operator)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.cases", hasSize(2)));
     }
 
     @Test
@@ -314,6 +310,16 @@ class GuildModerationHttpIntegrationTest {
         AuthenticatedOperator operator = authorize("cases-invalid");
 
         mockMvc.perform(get(casesUrl(GUILD_ID)).param("limit", "0")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"bad_request\"}"));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).param("limit", "101")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"bad_request\"}"));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).param("limit", "250")
                         .with(oauth2Login().oauth2User(operator)))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("{\"error\":\"bad_request\"}"));
