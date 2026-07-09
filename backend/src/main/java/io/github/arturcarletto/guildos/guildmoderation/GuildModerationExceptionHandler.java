@@ -1,5 +1,6 @@
 package io.github.arturcarletto.guildos.guildmoderation;
 
+import org.springframework.core.convert.ConversionFailedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -17,7 +18,8 @@ class GuildModerationExceptionHandler {
             MethodArgumentNotValidException.class,
             HttpMessageNotReadableException.class,
             MissingServletRequestParameterException.class,
-            MethodArgumentTypeMismatchException.class
+            MethodArgumentTypeMismatchException.class,
+            ConversionFailedException.class
     })
     ResponseEntity<ModerationErrorResponse> handleBadRequest(Exception exception) {
         String message = exception instanceof InvalidModerationActionException invalid

@@ -1,5 +1,7 @@
 package io.github.arturcarletto.guildos.guildmoderation;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,6 +19,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import io.github.arturcarletto.guildos.MutableClockTestConfiguration;
+import io.github.arturcarletto.guildos.MutableTestClock;
 import io.github.arturcarletto.guildos.TestcontainersConfiguration;
 import io.github.arturcarletto.guildos.guild.ConnectGuildCommand;
 import io.github.arturcarletto.guildos.guild.GuildConnectionService;
@@ -30,6 +33,7 @@ import io.github.arturcarletto.guildos.identity.OperatorLoginService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -58,6 +62,9 @@ class GuildModerationHttpIntegrationTest {
     private static final String GUILD_ID = "200000000000000916";
     private static final String MISSING_GUILD_ID = "200000000000000917";
     private static final String TARGET_USER_ID = "300000000000000916";
+    private static final String SECOND_TARGET_USER_ID = "300000000000000917";
+    private static final Instant INSTANT_A = MutableClockTestConfiguration.INITIAL_INSTANT;
+    private static final Instant INSTANT_B = INSTANT_A.plus(1, ChronoUnit.HOURS);
 
     @Autowired
     private WebApplicationContext webApplicationContext;
@@ -77,6 +84,9 @@ class GuildModerationHttpIntegrationTest {
     @Autowired
     private GuildDirectory guildDirectory;
 
+    @Autowired
+    private MutableTestClock clock;
+
     @MockitoBean
     private GuildModerationDiscordClient discordClient;
 
@@ -84,6 +94,8 @@ class GuildModerationHttpIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        clock.setInstant(INSTANT_A);
+        jdbcTemplate.update("DELETE FROM guild_os.moderation_cases");
         jdbcTemplate.update("DELETE FROM guild_os.guild_audit_events");
         accessFixture.clear();
         reset(discordClient);
@@ -195,6 +207,9 @@ class GuildModerationHttpIntegrationTest {
 
         assertThat(auditRowsFor(guild.registeredGuildId()))
                 .containsExactly("MEMBER_TIMEOUT_CREATED:OPERATOR:Member timeout was created.:Member timeout");
+        assertThat(caseRowsFor(guild.registeredGuildId()))
+                .containsExactly("MEMBER_TIMEOUT_CREATED:DISCORD_USER:" + TARGET_USER_ID
+                        + ":10:COMPLETED:Member timeout completed.");
     }
 
     @Test
@@ -215,6 +230,142 @@ class GuildModerationHttpIntegrationTest {
                 .andExpect(jsonPath("$.message").value("The bot cannot timeout members in this guild."));
 
         assertThat(auditRowsFor(guild.registeredGuildId())).isEmpty();
+        assertThat(caseRowsFor(guild.registeredGuildId())).isEmpty();
+    }
+
+    @Test
+    void authorizedCaseListReturnsNewestCasesWithoutInternalFields() throws Exception {
+        AuthenticatedOperator operator = authorize("cases-read");
+        clearAuditEvents();
+        clearModerationCases();
+
+        clock.setInstant(INSTANT_A);
+        createTimeout(operator, validBody());
+        clock.setInstant(INSTANT_B);
+        createTimeout(operator, body("""
+                "targetUserId":"%s","durationMinutes":20,"reason":"Second raw reason"
+                """.formatted(SECOND_TARGET_USER_ID)));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.*", hasSize(2)))
+                .andExpect(jsonPath("$.guildId").value(GUILD_ID))
+                .andExpect(jsonPath("$.cases", hasSize(2)))
+                .andExpect(jsonPath("$.cases[0].*", hasSize(8)))
+                .andExpect(jsonPath("$.cases[0].publicCaseId").value(startsWith("case_")))
+                .andExpect(jsonPath("$.cases[0].actionType").value("MEMBER_TIMEOUT_CREATED"))
+                .andExpect(jsonPath("$.cases[0].targetType").value("DISCORD_USER"))
+                .andExpect(jsonPath("$.cases[0].targetUserId").value(SECOND_TARGET_USER_ID))
+                .andExpect(jsonPath("$.cases[0].durationMinutes").value(20))
+                .andExpect(jsonPath("$.cases[0].status").value("COMPLETED"))
+                .andExpect(jsonPath("$.cases[0].summary").value("Member timeout completed."))
+                .andExpect(jsonPath("$.cases[0].occurredAt").value(INSTANT_B.toString()))
+                .andExpect(jsonPath("$.cases[0].id").doesNotExist())
+                .andExpect(jsonPath("$.cases[0].registeredGuildId").doesNotExist())
+                .andExpect(jsonPath("$.cases[0].operatorId").doesNotExist())
+                .andExpect(jsonPath("$.cases[0].reason").doesNotExist())
+                .andExpect(jsonPath("$.cases[0].username").doesNotExist())
+                .andExpect(jsonPath("$.cases[0].displayName").doesNotExist())
+                .andExpect(jsonPath("$.cases[0].avatar").doesNotExist())
+                .andExpect(jsonPath("$.cases[0].rawDiscordPayload").doesNotExist())
+                .andExpect(jsonPath("$.cases[0].stackTrace").doesNotExist())
+                .andExpect(jsonPath("$.cases[1].targetUserId").value(TARGET_USER_ID))
+                .andExpect(jsonPath("$.cases[1].occurredAt").value(INSTANT_A.toString()));
+    }
+
+    @Test
+    void caseListSupportsLimitActionAndTimeFilters() throws Exception {
+        AuthenticatedOperator operator = authorize("cases-filters");
+        clearAuditEvents();
+        clearModerationCases();
+
+        clock.setInstant(INSTANT_A);
+        createTimeout(operator, validBody());
+        clock.setInstant(INSTANT_B);
+        createTimeout(operator, body("""
+                "targetUserId":"%s","durationMinutes":20
+                """.formatted(SECOND_TARGET_USER_ID)));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID))
+                        .param("limit", "1")
+                        .param("actionType", "MEMBER_TIMEOUT_CREATED")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cases", hasSize(1)))
+                .andExpect(jsonPath("$.cases[0].targetUserId").value(SECOND_TARGET_USER_ID));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID))
+                        .param("actionType", "MEMBER_TIMEOUT_CREATED")
+                        .param("from", INSTANT_A.toString())
+                        .param("to", INSTANT_B.toString())
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cases", hasSize(1)))
+                .andExpect(jsonPath("$.cases[0].targetUserId").value(TARGET_USER_ID));
+
+    }
+
+    @Test
+    void caseListRejectsInvalidFiltersWithControlledBadRequest() throws Exception {
+        AuthenticatedOperator operator = authorize("cases-invalid");
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).param("limit", "0")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"bad_request\"}"));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).param("limit", "101")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"bad_request\"}"));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).param("limit", "250")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"bad_request\"}"));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).param("actionType", "UNKNOWN")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"bad_request\"}"));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID))
+                        .param("from", INSTANT_B.toString())
+                        .param("to", INSTANT_A.toString())
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"bad_request\"}"));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).param("from", "not-an-instant")
+                        .with(oauth2Login().oauth2User(operator)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"bad_request\"}"));
+    }
+
+    @Test
+    void caseListUnauthenticatedMissingUnauthorizedAndRevokedAccessDoNotEnumerateGuilds()
+            throws Exception {
+        AuthenticatedOperator authorized = authorize("cases-authorized");
+        AuthenticatedOperator stranger = newOperator("cases-stranger");
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(content().json("{\"error\":\"unauthorized\"}"));
+
+        mockMvc.perform(get(casesUrl(MISSING_GUILD_ID)).with(oauth2Login().oauth2User(authorized)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\":\"not_found\"}"));
+
+        mockMvc.perform(get(casesUrl(GUILD_ID)).with(oauth2Login().oauth2User(stranger)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\":\"not_found\"}"));
+
+        RegisteredGuildView guild = registeredGuild();
+        accessFixture.revoke(authorized.operatorId(), guild.registeredGuildId());
+        mockMvc.perform(get(casesUrl(GUILD_ID)).with(oauth2Login().oauth2User(authorized)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\":\"not_found\"}"));
     }
 
     @Test
@@ -394,6 +545,10 @@ class GuildModerationHttpIntegrationTest {
         jdbcTemplate.update("DELETE FROM guild_os.guild_audit_events");
     }
 
+    private void clearModerationCases() {
+        jdbcTemplate.update("DELETE FROM guild_os.moderation_cases");
+    }
+
     private List<String> auditRowsFor(UUID registeredGuildId) {
         return jdbcTemplate.queryForList(
                 """
@@ -406,12 +561,38 @@ class GuildModerationHttpIntegrationTest {
                 registeredGuildId);
     }
 
+    private List<String> caseRowsFor(UUID registeredGuildId) {
+        return jdbcTemplate.queryForList(
+                """
+                        SELECT action_type || ':' || target_type || ':' || target_discord_user_id || ':'
+                            || duration_minutes || ':' || status || ':' || summary
+                        FROM guild_os.moderation_cases
+                        WHERE registered_guild_id = ?
+                        ORDER BY occurred_at ASC
+                        """,
+                String.class,
+                registeredGuildId);
+    }
+
+    private void createTimeout(AuthenticatedOperator operator, String requestBody) throws Exception {
+        mockMvc.perform(post(url(GUILD_ID))
+                        .with(oauth2Login().oauth2User(operator))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk());
+    }
+
     private static String url(String discordGuildId) {
         return "/api/v1/guilds/" + discordGuildId + "/moderation/timeout";
     }
 
     private static String searchUrl(String discordGuildId) {
         return "/api/v1/guilds/" + discordGuildId + "/moderation/members/search";
+    }
+
+    private static String casesUrl(String discordGuildId) {
+        return "/api/v1/guilds/" + discordGuildId + "/moderation/cases";
     }
 
     private static String validBody() {

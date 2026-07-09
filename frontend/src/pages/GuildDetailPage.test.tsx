@@ -16,6 +16,7 @@ vi.mock('../api/client', async () => {
       listGuildChannels: vi.fn(),
       getMemberMessageConfig: vi.fn(),
       createMemberTimeout: vi.fn(),
+      getModerationCases: vi.fn(),
     },
   };
 });
@@ -41,6 +42,7 @@ beforeEach(() => {
     { guildId: '123456789012345678', name: 'Test Guild', role: 'OWNER' },
   ]);
   mockedApi.listGuildChannels.mockResolvedValue([]);
+  mockedApi.getModerationCases.mockResolvedValue({ guildId: '123456789012345678', cases: [] });
   mockedApi.getMemberMessageConfig.mockImplementation((_guildId, kind) =>
     Promise.resolve({
       kind: kind === 'welcome' ? 'WELCOME' : 'GOODBYE',

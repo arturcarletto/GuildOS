@@ -1,9 +1,14 @@
-import { useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 
 import { ApiError, api } from '../../api/client';
-import type { MemberSearchResultMember } from '../../api/types';
-import { Banner } from '../../components/states';
-import { describeError } from '../../hooks/useAsync';
+import type {
+  MemberSearchResultMember,
+  ModerationCase,
+  ModerationCasesResponse,
+} from '../../api/types';
+import { formatDateTime } from '../../components/format';
+import { Banner, EmptyState, ErrorState, LoadingState } from '../../components/states';
+import { describeError, useAsync } from '../../hooks/useAsync';
 
 type Feedback = { tone: 'success' | 'error'; message: string } | null;
 type SearchState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -18,6 +23,7 @@ const MAX_REASON_LENGTH = 240;
 const MIN_SEARCH_LENGTH = 2;
 const MAX_SEARCH_LENGTH = 64;
 const SEARCH_LIMIT = 10;
+const CASE_LIMIT = 50;
 
 export default function ModerationTab({ guildId }: { guildId: string }) {
   const [targetUserId, setTargetUserId] = useState('');
@@ -31,6 +37,11 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
   const [searchError, setSearchError] = useState('');
   const [results, setResults] = useState<MemberSearchResultMember[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const loadCases = useCallback(
+    () => api.getModerationCases(guildId, { limit: CASE_LIMIT }),
+    [guildId],
+  );
+  const caseHistory = useAsync<ModerationCasesResponse>(loadCases, [guildId]);
 
   const handleSearch = async (event: FormEvent) => {
     event.preventDefault();
@@ -83,6 +94,7 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
         message: `Member timeout created for ${response.targetUserId}.`,
       });
       setReason('');
+      caseHistory.reload();
     } catch (error) {
       setFeedback({ tone: 'error', message: describeModerationError(error) });
     } finally {
@@ -91,12 +103,12 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
   };
 
   return (
-    <div>
+    <div className="stack" style={{ gap: 16 }}>
       <div className="page-head" style={{ marginBottom: 8 }}>
         <h2 className="section__title">Moderation</h2>
         <p className="section__subtitle">
           Apply a Discord member timeout through the bot and record the successful action in the
-          audit log.
+          privacy-safe moderation case history and audit log.
         </p>
       </div>
 
@@ -256,7 +268,7 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
 
           <div className="row-between">
             <span className="field__hint">
-              Audit log summaries stay generic and never include the reason.
+              Case history and audit log summaries stay generic and never include the reason.
             </span>
             <button type="submit" className="btn btn--primary" disabled={submitting}>
               {submitting ? 'Applying...' : 'Apply timeout'}
@@ -264,6 +276,74 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
           </div>
         </form>
       </div>
+
+      <ModerationCaseHistory
+        cases={caseHistory.data?.cases ?? []}
+        loading={caseHistory.loading}
+        error={caseHistory.error}
+        onRetry={caseHistory.reload}
+      />
+    </div>
+  );
+}
+
+function ModerationCaseHistory({
+  cases,
+  loading,
+  error,
+  onRetry,
+}: {
+  cases: ModerationCase[];
+  loading: boolean;
+  error: Error | null;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="card card--pad">
+      <div className="row-between" style={{ marginBottom: 14 }}>
+        <h3 className="section__title">Recent moderation cases</h3>
+        <span className="badge badge--role">Read only</span>
+      </div>
+
+      {loading ? <LoadingState label="Loading moderation cases..." /> : null}
+      {!loading && error ? <ErrorState message={describeError(error)} onRetry={onRetry} /> : null}
+      {!loading && !error && cases.length === 0 ? (
+        <EmptyState title="No moderation cases yet." />
+      ) : null}
+      {!loading && !error && cases.length > 0 ? <ModerationCaseTable cases={cases} /> : null}
+    </div>
+  );
+}
+
+function ModerationCaseTable({ cases }: { cases: ModerationCase[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="data">
+        <thead>
+          <tr>
+            <th scope="col">Time</th>
+            <th scope="col">Action</th>
+            <th scope="col">Target user ID</th>
+            <th scope="col">Duration</th>
+            <th scope="col">Status</th>
+            <th scope="col">Summary</th>
+          </tr>
+        </thead>
+        <tbody>
+          {cases.map((moderationCase) => (
+            <tr key={moderationCase.publicCaseId}>
+              <td>{formatDateTime(moderationCase.occurredAt)}</td>
+              <td>
+                <span className="badge">{labelFromConstant(moderationCase.actionType)}</span>
+              </td>
+              <td className="mono">{moderationCase.targetUserId}</td>
+              <td>{durationLabel(moderationCase.durationMinutes)}</td>
+              <td>{labelFromConstant(moderationCase.status)}</td>
+              <td>{moderationCase.summary}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -311,4 +391,16 @@ function describeModerationError(error: unknown): string {
     }
   }
   return describeError(error);
+}
+
+function durationLabel(durationMinutes: number | null): string {
+  return durationMinutes === null ? '-' : `${durationMinutes} min`;
+}
+
+function labelFromConstant(value: string): string {
+  return value
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+    .join(' ');
 }
