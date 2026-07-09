@@ -196,6 +196,65 @@ describe('GET requests', () => {
 
     expect(urlOf(0)).toBe('/api/v1/guilds/9/moderation/members/search?query=art');
   });
+
+  it('requests moderation case filters and ignores internal case fields', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        json: {
+          guildId: '9',
+          cases: [
+            {
+              id: 'internal-db-id',
+              registeredGuildId: 'internal-guild-id',
+              operatorId: 'internal-operator-id',
+              reason: 'raw reason',
+              username: 'some_user',
+              publicCaseId: 'case_abc',
+              actionType: 'MEMBER_TIMEOUT_CREATED',
+              targetType: 'DISCORD_USER',
+              targetUserId: '123456789012345678',
+              durationMinutes: 10,
+              status: 'COMPLETED',
+              summary: 'Member timeout completed.',
+              occurredAt: '2026-01-02T03:04:05Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    const response = await api.getModerationCases('9', {
+      limit: 100,
+      actionType: 'MEMBER_TIMEOUT_CREATED',
+      from: '2026-01-01T00:00:00Z',
+      to: '2026-01-03T00:00:00Z',
+    });
+
+    expect(urlOf(0)).toBe(
+      '/api/v1/guilds/9/moderation/cases?limit=100&actionType=MEMBER_TIMEOUT_CREATED&from=2026-01-01T00%3A00%3A00Z&to=2026-01-03T00%3A00%3A00Z',
+    );
+    const init = initOf(0);
+    expect(init.method).toBe('GET');
+    expect(init.credentials).toBe('include');
+    expect((init.headers as Record<string, string>)['X-CSRF-TOKEN']).toBeUndefined();
+    expect(response).toEqual({
+      guildId: '9',
+      cases: [
+        {
+          publicCaseId: 'case_abc',
+          actionType: 'MEMBER_TIMEOUT_CREATED',
+          targetType: 'DISCORD_USER',
+          targetUserId: '123456789012345678',
+          durationMinutes: 10,
+          status: 'COMPLETED',
+          summary: 'Member timeout completed.',
+          occurredAt: '2026-01-02T03:04:05Z',
+        },
+      ],
+    });
+    expect((response.cases[0] as unknown as Record<string, unknown>).operatorId).toBeUndefined();
+    expect((response.cases[0] as unknown as Record<string, unknown>).reason).toBeUndefined();
+  });
 });
 
 describe('CSRF handling on state-changing requests', () => {

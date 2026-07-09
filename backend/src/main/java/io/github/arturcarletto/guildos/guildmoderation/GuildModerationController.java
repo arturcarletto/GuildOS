@@ -1,5 +1,7 @@
 package io.github.arturcarletto.guildos.guildmoderation;
 
+import java.time.Instant;
+
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,5 +39,16 @@ class GuildModerationController {
             @RequestParam(required = false) Integer limit,
             @AuthenticationPrincipal AuthenticatedOperator operator) {
         return service.searchMembers(operator.operatorId(), discordGuildId, query, limit);
+    }
+
+    @GetMapping("/cases")
+    ModerationCasesResponse listCases(
+            @PathVariable String discordGuildId,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String actionType,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @AuthenticationPrincipal AuthenticatedOperator operator) {
+        return service.listCases(operator.operatorId(), discordGuildId, limit, actionType, from, to);
     }
 }

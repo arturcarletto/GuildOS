@@ -189,6 +189,32 @@ export interface ModerationActionResponse {
   status: string;
 }
 
+/** Privacy-safe moderation case. No database UUIDs, operator ids, Discord names, or raw reasons. */
+export interface ModerationCase {
+  publicCaseId: string;
+  actionType: string;
+  targetType: string;
+  targetUserId: string;
+  durationMinutes: number | null;
+  status: string;
+  summary: string;
+  occurredAt: string;
+}
+
+/** `GET /api/v1/guilds/{id}/moderation/cases` response. */
+export interface ModerationCasesResponse {
+  guildId: string;
+  cases: ModerationCase[];
+}
+
+/** Optional filters for moderation case history. */
+export interface ModerationCasesOptions {
+  limit?: number;
+  actionType?: string;
+  from?: string;
+  to?: string;
+}
+
 /**
  * A single member returned by a live moderation search. These fields are transient selection
  * metadata resolved from Discord at request time; Guild OS does not persist them.

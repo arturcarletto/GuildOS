@@ -1,10 +1,10 @@
 # Guild OS
 
-Guild OS is a platform for managing, automating, and analyzing online communities. It is evolving from a Discord-first backend toward multi-platform community management: a Guild OS core (activity ingestion, analytics, operator/dashboard APIs, onboarding, settings, audit logging, moderation foundations, and small platform-neutral abstractions) with pluggable platform adapters. Discord is the first complete adapter; Telegram is an experimental, disabled-by-default proof-of-concept adapter. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, synced Discord channel metadata, a privacy-safe guild audit log, the guild-scoped `/status` command, Discord administration and delivery of welcome/goodbye messages, member timeout moderation through the dashboard API, durable Discord activity ingestion, authorized hourly activity analytics, a first operator dashboard frontend that consumes the existing authenticated APIs, and a minimal Telegram adapter that answers a `/ping` command.
+Guild OS is a platform for managing, automating, and analyzing online communities. It is evolving from a Discord-first backend toward multi-platform community management: a Guild OS core (activity ingestion, analytics, operator/dashboard APIs, onboarding, settings, audit logging, moderation foundations, and small platform-neutral abstractions) with pluggable platform adapters. Discord is the first complete adapter; Telegram is an experimental, disabled-by-default proof-of-concept adapter. This repository currently contains the production-oriented foundation for its backend, an optional Discord Gateway connection, a persistent registry of connected guilds, optional Discord OAuth2 login for human operators, guild onboarding that authorizes operators to manage specific guilds, authorized persistent guild settings, synced Discord channel metadata, a privacy-safe guild audit log, the guild-scoped `/status` command, Discord administration and delivery of welcome/goodbye messages, member timeout moderation through the dashboard API with privacy-safe case history, durable Discord activity ingestion, authorized hourly activity analytics, a first operator dashboard frontend that consumes the existing authenticated APIs, and a minimal Telegram adapter that answers a `/ping` command.
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend and frontend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, synced Discord text/announcement channel metadata, a privacy-safe guild-scoped audit log, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, a safe member timeout moderation action foundation with a privacy-conscious live member search, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, an authorized hourly analytics API, a first React operator dashboard frontend for sign-in, onboarding, settings, moderation, analytics, audit-log review, and member-message automation, a small platform-neutral abstraction layer, and an experimental Telegram adapter proof of concept. Bot Gateway, human OAuth, and Telegram integrations are independently disabled by default. Discord remains the first complete adapter; the Telegram adapter is an early proof of concept that only answers `/ping` and does not yet onboard chats, authenticate operators, persist activity, or deliver welcome/goodbye messages. The frontend is an early foundation: real-time dashboards, advanced moderation workflows, AI features, billing, retention automation, and advanced analytics visualization are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend and frontend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, synced Discord text/announcement channel metadata, a privacy-safe guild-scoped audit log, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, a safe member timeout moderation action foundation with privacy-conscious live member search and case history, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, an authorized hourly analytics API, a first React operator dashboard frontend for sign-in, onboarding, settings, moderation, analytics, audit-log review, and member-message automation, a small platform-neutral abstraction layer, and an experimental Telegram adapter proof of concept. Bot Gateway, human OAuth, and Telegram integrations are independently disabled by default. Discord remains the first complete adapter; the Telegram adapter is an early proof of concept that only answers `/ping` and does not yet onboard chats, authenticate operators, persist activity, or deliver welcome/goodbye messages. The frontend is an early foundation: real-time dashboards, advanced moderation workflows, AI features, billing, retention automation, and advanced analytics visualization are not implemented yet.
 
 ## Technology stack
 
@@ -264,9 +264,41 @@ POST /api/v1/guilds/{discordGuildId}/moderation/timeout
 
 Authorization uses the same operator-to-guild boundary as settings and automation. The operator id comes only from `@AuthenticationPrincipal AuthenticatedOperator`; requests cannot supply an operator id, role, internal guild id, or authorization state. Unknown guilds, missing access, and revoked access all return the same safe `404` response. Invalid target ids, durations outside 1 minute to 28 days, and blank or overlong reasons return controlled `400` responses. State-changing requests require the active CSRF token.
 
-The `guildmoderation` capability owns request validation, the HTTP endpoint, orchestration, safe response DTOs, and the application-facing outbound port. JDA stays inside the `discord` adapter, where the bot resolves the guild/member, checks `MODERATE_MEMBERS`, and performs the timeout. The Discord action is not executed inside a database transaction. After Discord accepts the timeout, Guild OS records one `MEMBER_TIMEOUT_CREATED` audit event in a short local transaction and returns only safe fields: Discord guild id, action type, target Discord user id, duration, and status.
+The `guildmoderation` capability owns request validation, the HTTP endpoint, orchestration, safe response DTOs, the dedicated case-history model, and the application-facing outbound port. JDA stays inside the `discord` adapter, where the bot resolves the guild/member, checks `MODERATE_MEMBERS`, and performs the timeout. The Discord action is not executed inside a database transaction. After Discord accepts the timeout, Guild OS records one `MEMBER_TIMEOUT_CREATED` moderation case and one matching audit event in the same short local transaction, then returns only safe fields: Discord guild id, action type, target Discord user id, duration, and status. Failed Discord actions do not create success cases or audit rows.
 
-Audit summaries are application-generated and generic. Guild OS does not store or expose the moderation reason, internal UUIDs, operator ids, OAuth/session/token data, raw Discord payloads, raw exception messages, message content, or Discord display names for this action. Adapter logs use bounded metadata only: action type, guild id, target user id, and failure category.
+Case and audit summaries are application-generated and generic. Guild OS does not store or expose the moderation reason, internal UUIDs, operator ids, OAuth/session/token data, raw Discord payloads, raw exception messages, message content, member display names, usernames, or avatars for this action. Adapter logs use bounded metadata only: action type, guild id, target user id, and failure category.
+
+### Moderation case history
+
+Read recent successful moderation cases with an authenticated, read-only request:
+
+```text
+GET /api/v1/guilds/{discordGuildId}/moderation/cases
+```
+
+Optional query parameters are `limit` (default 50, max 100), `actionType`, `from`, and `to` as ISO instants. Results are newest first and require the same active operator-to-guild access as settings, audit log, timeout actions, and member search. Unknown guilds, missing access, and revoked access return the same safe non-enumerating `404`; invalid limits, action types, or date ranges return controlled `400` responses.
+
+Example response:
+
+```json
+{
+  "guildId": "123456789012345678",
+  "cases": [
+    {
+      "publicCaseId": "case_7f3d2a6e4c1b4b0ca9f2d5e8a110bb33",
+      "actionType": "MEMBER_TIMEOUT_CREATED",
+      "targetType": "DISCORD_USER",
+      "targetUserId": "123456789012345678",
+      "durationMinutes": 10,
+      "status": "COMPLETED",
+      "summary": "Member timeout completed.",
+      "occurredAt": "2026-07-03T10:00:00Z"
+    }
+  ]
+}
+```
+
+The case table stores only a public case id, the registered guild reference, action type, target type, target Discord user id, timeout duration, status, occurrence/creation timestamps, and the bounded Guild OS summary. It currently records successful member timeout actions only. It is not a moderation queue, appeal system, AI moderation system, kick/ban/warning/message-deletion system, automation engine, or realtime moderation stream.
 
 ### Member search foundation
 
@@ -291,7 +323,7 @@ Member search is a **live, authenticated lookup, not a persisted member director
 
 The `guildmoderation` capability owns validation, the HTTP endpoint, orchestration, safe DTOs, and the outbound port; JDA member resolution stays in the `discord` adapter and is not run inside a database transaction. Searches are read-only and **never create audit events.** Guild OS does not store member names, display names, avatar URLs, or search queries for this feature: the username/displayName fields are transient selection metadata resolved from Discord at request time. Adapter logs use bounded metadata only (guild id and failure category) and never usernames, display names, avatars, raw Discord payloads, or search terms.
 
-Not implemented yet: warnings, kick, ban, message deletion, moderation queues, AI moderation, appeal workflows, realtime moderation streams, moderation automation, a persistent member directory or member profile table, avatar storage, role management, Telegram member search, or a dedicated moderation action history table beyond the guild audit log.
+Not implemented yet: warnings, kick, ban, message deletion, moderation queues, AI moderation, appeal workflows, realtime moderation streams, moderation automation, a persistent member directory or member profile table, avatar storage, role management, or Telegram member search.
 
 ## Durable activity ingestion and hourly analytics
 
@@ -568,7 +600,7 @@ The dashboard **preview never sends a message to Discord**: it renders determini
 
 ### Apply member timeouts from the dashboard
 
-The guild detail page includes a **Moderation** tab with a live member search above a member-timeout form. The search field performs an authenticated live lookup (by username, nickname, or Discord user id) and shows loading, empty, and error states; selecting a result fills the timeout target user id, and manual id entry remains available as a fallback. The timeout form accepts a target Discord user id, a duration in minutes, and an optional bounded reason, then calls the CSRF-protected moderation endpoint described above. Member search results are transient — the browser never persists member names or search terms, matching the backend, which stores no member profile metadata. Successful timeout actions appear in the guild audit log as generic member-timeout events; searches never create audit rows, and failed Discord actions return controlled error states.
+The guild detail page includes a **Moderation** tab with a live member search above a member-timeout form and a Recent moderation cases section. The search field performs an authenticated live lookup (by username, nickname, or Discord user id) and shows loading, empty, and error states; selecting a result fills the timeout target user id, and manual id entry remains available as a fallback. The timeout form accepts a target Discord user id, a duration in minutes, and an optional bounded reason, then calls the CSRF-protected moderation endpoint described above. Member search results are transient — the browser never persists member names or search terms, matching the backend, which stores no member profile metadata. Successful timeout actions appear in both the privacy-safe moderation case history and the guild audit log as generic member-timeout events; the case list refreshes after a successful timeout. Searches never create audit rows or cases, and failed Discord actions return controlled error states.
 
 ### Review guild audit events
 

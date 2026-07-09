@@ -40,6 +40,9 @@ import type {
   MemberSearchResponse,
   MemberSearchResultMember,
   ModerationActionResponse,
+  ModerationCase,
+  ModerationCasesOptions,
+  ModerationCasesResponse,
   ToggleMemberMessageRequest,
   UpdateGuildSettingsRequest,
   UpdateMemberMessageRequest,
@@ -380,6 +383,38 @@ function parseModerationActionResponse(value: unknown): ModerationActionResponse
   };
 }
 
+function parseModerationCase(value: unknown): ModerationCase | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const publicCaseId = asString(value.publicCaseId);
+  const occurredAt = asString(value.occurredAt);
+  const actionType = asString(value.actionType);
+  const targetType = asString(value.targetType);
+  const targetUserId = asString(value.targetUserId);
+  if (!publicCaseId || !occurredAt || !actionType || !targetType || !targetUserId) {
+    return null;
+  }
+  return {
+    publicCaseId,
+    actionType,
+    targetType,
+    targetUserId,
+    durationMinutes: typeof value.durationMinutes === 'number' ? value.durationMinutes : null,
+    status: asRequiredString(value.status),
+    summary: asRequiredString(value.summary),
+    occurredAt,
+  };
+}
+
+function parseModerationCasesResponse(value: unknown): ModerationCasesResponse {
+  const source = isRecord(value) ? value : {};
+  return {
+    guildId: asRequiredString(source.guildId),
+    cases: asArray(source.cases, parseModerationCase),
+  };
+}
+
 function parseMemberSearchResultMember(value: unknown): MemberSearchResultMember | null {
   if (!isRecord(value)) {
     return null;
@@ -426,6 +461,26 @@ function guildAuditLogUrl(discordGuildId: string, options: GuildAuditLogOptions 
   }
   const suffix = query.toString();
   return `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/audit-log${
+    suffix ? `?${suffix}` : ''
+  }`;
+}
+
+function moderationCasesUrl(discordGuildId: string, options: ModerationCasesOptions = {}): string {
+  const query = new URLSearchParams();
+  if (options.limit !== undefined) {
+    query.set('limit', String(options.limit));
+  }
+  if (options.actionType) {
+    query.set('actionType', options.actionType);
+  }
+  if (options.from) {
+    query.set('from', options.from);
+  }
+  if (options.to) {
+    query.set('to', options.to);
+  }
+  const suffix = query.toString();
+  return `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/moderation/cases${
     suffix ? `?${suffix}` : ''
   }`;
 }
@@ -566,6 +621,13 @@ export const api = {
       parseModerationActionResponse,
       request,
     );
+  },
+
+  getModerationCases(
+    discordGuildId: string,
+    options: ModerationCasesOptions = {},
+  ): Promise<ModerationCasesResponse> {
+    return getJson(moderationCasesUrl(discordGuildId, options), parseModerationCasesResponse);
   },
 
   searchGuildMembers(

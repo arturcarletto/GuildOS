@@ -9,12 +9,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import io.github.arturcarletto.guildos.guildaccess.AuthorizedGuildAccess;
 import io.github.arturcarletto.guildos.guildaccess.GuildAccessAuthorizer;
-import io.github.arturcarletto.guildos.guildaudit.GuildAuditEventType;
-import io.github.arturcarletto.guildos.guildaudit.GuildAuditRecorder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -28,15 +27,17 @@ class GuildModerationServiceTest {
 
     private final GuildAccessAuthorizer authorizer = mock(GuildAccessAuthorizer.class);
     private final GuildModerationDiscordClient discordClient = mock(GuildModerationDiscordClient.class);
-    private final GuildAuditRecorder auditRecorder = mock(GuildAuditRecorder.class);
+    private final GuildModerationCaseRecorder caseRecorder = mock(GuildModerationCaseRecorder.class);
+    private final ModerationCaseStore caseStore = mock(ModerationCaseStore.class);
     private final GuildModerationService service =
-            new GuildModerationService(authorizer, discordClient, auditRecorder);
+            new GuildModerationService(authorizer, discordClient, caseRecorder, caseStore);
 
     @Test
-    void successfulTimeoutCallsDiscordOutsideTransactionThenAudits() {
+    void successfulTimeoutCallsDiscordOutsideTransactionThenRecordsCaseAndAudit() {
         allowAccess();
         when(discordClient.timeoutMember(any())).thenAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            verify(caseRecorder, never()).recordSuccessfulMemberTimeout(any(), any(), any());
             TimeoutMemberCommand command = invocation.getArgument(0);
             assertThat(command.discordGuildId()).isEqualTo(GUILD_ID);
             assertThat(command.targetUserId()).isEqualTo("800000000000000001");
@@ -51,14 +52,18 @@ class GuildModerationServiceTest {
 
         assertThat(response.actionType()).isEqualTo("MEMBER_TIMEOUT");
         assertThat(response.status()).isEqualTo("SUCCEEDED");
-        verify(auditRecorder).recordOperatorEvent(
+        verify(caseRecorder).recordSuccessfulMemberTimeout(
                 REGISTERED_GUILD_ID,
                 OPERATOR_ID,
-                GuildAuditEventType.MEMBER_TIMEOUT_CREATED);
+                new TimeoutMemberCommand(
+                        GUILD_ID,
+                        "800000000000000001",
+                        java.time.Duration.ofMinutes(10),
+                        Optional.of("Repeated spam")));
     }
 
     @Test
-    void discordFailureDoesNotAuditSuccess() {
+    void discordFailureDoesNotRecordCaseOrAuditSuccess() {
         allowAccess();
         when(discordClient.timeoutMember(any()))
                 .thenThrow(new ModerationDiscordActionException(ModerationFailureCategory.BOT_PERMISSION_MISSING));
@@ -69,7 +74,7 @@ class GuildModerationServiceTest {
                 request("800000000000000001", 10, "Repeated spam")))
                 .isInstanceOf(ModerationDiscordActionException.class);
 
-        verify(auditRecorder, never()).recordOperatorEvent(any(), any(), any());
+        verify(caseRecorder, never()).recordSuccessfulMemberTimeout(any(), any(), any());
     }
 
     @Test
@@ -80,7 +85,7 @@ class GuildModerationServiceTest {
                 .isInstanceOf(ModerationAccessNotFoundException.class);
 
         verify(discordClient, never()).searchMembers(any());
-        verify(auditRecorder, never()).recordOperatorEvent(any(), any(), any());
+        verify(caseRecorder, never()).recordSuccessfulMemberTimeout(any(), any(), any());
     }
 
     @Test
@@ -114,7 +119,7 @@ class GuildModerationServiceTest {
         assertThat(response.limit()).isEqualTo(25);
         assertThat(response.results()).singleElement()
                 .satisfies(member -> assertThat(member.userId()).isEqualTo("800000000000000001"));
-        verify(auditRecorder, never()).recordOperatorEvent(any(), any(), any());
+        verify(caseRecorder, never()).recordSuccessfulMemberTimeout(any(), any(), any());
     }
 
     @Test
@@ -126,7 +131,27 @@ class GuildModerationServiceTest {
         assertThatThrownBy(() -> service.searchMembers(OPERATOR_ID, GUILD_ID, "art", null))
                 .isInstanceOf(ModerationDiscordActionException.class);
 
-        verify(auditRecorder, never()).recordOperatorEvent(any(), any(), any());
+        verify(caseRecorder, never()).recordSuccessfulMemberTimeout(any(), any(), any());
+    }
+
+    @Test
+    void listCasesReusesAuthorizationBoundaryBeforeReadingHistory() {
+        when(authorizer.findActive(OPERATOR_ID, GUILD_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.listCases(OPERATOR_ID, GUILD_ID, null, null, null, null))
+                .isInstanceOf(ModerationAccessNotFoundException.class);
+
+        verify(caseStore, never()).find(any(), any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void listCasesValidatesFiltersBeforeReadingHistory() {
+        assertThatThrownBy(() -> service.listCases(OPERATOR_ID, GUILD_ID, 0, null, null, null))
+                .isInstanceOf(InvalidModerationActionException.class);
+        assertThatThrownBy(() -> service.listCases(OPERATOR_ID, GUILD_ID, null, "UNKNOWN", null, null))
+                .isInstanceOf(InvalidModerationActionException.class);
+
+        verify(caseStore, never()).find(any(), any(), any(), any(), anyInt());
     }
 
     private void allowAccess() {
