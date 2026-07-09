@@ -37,6 +37,8 @@ import type {
   MemberMessageConfig,
   MemberMessageKind,
   MemberMessagePreview,
+  MemberSearchResponse,
+  MemberSearchResultMember,
   ModerationActionResponse,
   ToggleMemberMessageRequest,
   UpdateGuildSettingsRequest,
@@ -378,6 +380,32 @@ function parseModerationActionResponse(value: unknown): ModerationActionResponse
   };
 }
 
+function parseMemberSearchResultMember(value: unknown): MemberSearchResultMember | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const userId = asString(value.userId);
+  if (!userId) {
+    return null;
+  }
+  return {
+    userId,
+    username: asString(value.username),
+    displayName: asString(value.displayName),
+    bot: asBoolean(value.bot),
+  };
+}
+
+function parseMemberSearchResponse(value: unknown): MemberSearchResponse {
+  const source = isRecord(value) ? value : {};
+  return {
+    guildId: asRequiredString(source.guildId),
+    query: asRequiredString(source.query),
+    limit: asNumber(source.limit),
+    results: asArray(source.results, parseMemberSearchResultMember),
+  };
+}
+
 function memberMessageUrl(discordGuildId: string, kind: MemberMessageKind): string {
   return `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/member-messages/${kind}`;
 }
@@ -537,6 +565,21 @@ export const api = {
       `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/moderation/timeout`,
       parseModerationActionResponse,
       request,
+    );
+  },
+
+  searchGuildMembers(
+    discordGuildId: string,
+    query: string,
+    limit?: number,
+  ): Promise<MemberSearchResponse> {
+    const params = new URLSearchParams({ query });
+    if (limit !== undefined) {
+      params.set('limit', String(limit));
+    }
+    return getJson(
+      `/api/v1/guilds/${encodeURIComponent(discordGuildId)}/moderation/members/search?${params.toString()}`,
+      parseMemberSearchResponse,
     );
   },
 

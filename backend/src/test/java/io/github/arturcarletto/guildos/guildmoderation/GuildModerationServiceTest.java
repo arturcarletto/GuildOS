@@ -1,5 +1,6 @@
 package io.github.arturcarletto.guildos.guildmoderation;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -66,6 +67,63 @@ class GuildModerationServiceTest {
                 OPERATOR_ID,
                 GUILD_ID,
                 request("800000000000000001", 10, "Repeated spam")))
+                .isInstanceOf(ModerationDiscordActionException.class);
+
+        verify(auditRecorder, never()).recordOperatorEvent(any(), any(), any());
+    }
+
+    @Test
+    void searchEnforcesAuthorizationBoundaryBeforeCallingDiscord() {
+        when(authorizer.findActive(OPERATOR_ID, GUILD_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.searchMembers(OPERATOR_ID, GUILD_ID, "art", null))
+                .isInstanceOf(ModerationAccessNotFoundException.class);
+
+        verify(discordClient, never()).searchMembers(any());
+        verify(auditRecorder, never()).recordOperatorEvent(any(), any(), any());
+    }
+
+    @Test
+    void searchValidatesQueryBeforeCallingDiscord() {
+        allowAccess();
+
+        assertThatThrownBy(() -> service.searchMembers(OPERATOR_ID, GUILD_ID, "   ", null))
+                .isInstanceOf(InvalidModerationActionException.class);
+
+        verify(discordClient, never()).searchMembers(any());
+    }
+
+    @Test
+    void searchCallsDiscordOutsideTransactionAndNeverAudits() {
+        allowAccess();
+        when(discordClient.searchMembers(any())).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            MemberSearchQuery query = invocation.getArgument(0);
+            assertThat(query.discordGuildId()).isEqualTo(GUILD_ID);
+            assertThat(query.query()).isEqualTo("art");
+            assertThat(query.exactIdLookup()).isFalse();
+            assertThat(query.limit()).isEqualTo(25);
+            return new MemberSearchResult(List.of(
+                    new MemberSearchResultMember("800000000000000001", "some_user", "Some User", false)));
+        });
+
+        MemberSearchResponse response = service.searchMembers(OPERATOR_ID, GUILD_ID, " art ", 100);
+
+        assertThat(response.guildId()).isEqualTo(GUILD_ID);
+        assertThat(response.query()).isEqualTo("art");
+        assertThat(response.limit()).isEqualTo(25);
+        assertThat(response.results()).singleElement()
+                .satisfies(member -> assertThat(member.userId()).isEqualTo("800000000000000001"));
+        verify(auditRecorder, never()).recordOperatorEvent(any(), any(), any());
+    }
+
+    @Test
+    void searchAdapterFailureIsPropagatedAndNeverAudits() {
+        allowAccess();
+        when(discordClient.searchMembers(any()))
+                .thenThrow(new ModerationDiscordActionException(ModerationFailureCategory.GUILD_UNAVAILABLE));
+
+        assertThatThrownBy(() -> service.searchMembers(OPERATOR_ID, GUILD_ID, "art", null))
                 .isInstanceOf(ModerationDiscordActionException.class);
 
         verify(auditRecorder, never()).recordOperatorEvent(any(), any(), any());
