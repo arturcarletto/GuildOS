@@ -11,6 +11,7 @@ vi.mock('../../api/client', async () => {
     ...actual,
     api: {
       createMemberTimeout: vi.fn(),
+      searchGuildMembers: vi.fn(),
     },
   };
 });
@@ -26,17 +27,148 @@ beforeEach(() => {
     durationMinutes: 10,
     status: 'SUCCEEDED',
   });
+  mockedApi.searchGuildMembers.mockResolvedValue({
+    guildId: 'g1',
+    query: 'some',
+    limit: 10,
+    results: [
+      { userId: '123456789012345678', username: 'some_user', displayName: 'Some User', bot: false },
+    ],
+  });
 });
 
 describe('ModerationTab', () => {
-  it('renders the member timeout form', () => {
+  it('renders the member timeout form and the member search input', () => {
     render(<ModerationTab guildId="g1" />);
 
     expect(screen.getByRole('heading', { name: 'Moderation' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Search by name or user ID')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
     expect(screen.getByLabelText('Target Discord user ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Duration minutes')).toBeInTheDocument();
     expect(screen.getByLabelText('Reason')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply timeout' })).toBeInTheDocument();
+  });
+
+  it('shows a loading state and then renders search results', async () => {
+    const user = userEvent.setup();
+    let resolveSearch: (value: {
+      guildId: string;
+      query: string;
+      limit: number;
+      results: never[];
+    }) => void = () => {};
+    mockedApi.searchGuildMembers.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSearch = resolve;
+      }),
+    );
+
+    render(<ModerationTab guildId="g1" />);
+    await user.type(screen.getByLabelText('Search by name or user ID'), 'some');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(await screen.findByText('Searching members...')).toBeInTheDocument();
+
+    resolveSearch({ guildId: 'g1', query: 'some', limit: 10, results: [] });
+    await waitFor(() => {
+      expect(screen.queryByText('Searching members...')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows an empty state when no member matches', async () => {
+    const user = userEvent.setup();
+    mockedApi.searchGuildMembers.mockResolvedValue({
+      guildId: 'g1',
+      query: 'ghost',
+      limit: 10,
+      results: [],
+    });
+
+    render(<ModerationTab guildId="g1" />);
+    await user.type(screen.getByLabelText('Search by name or user ID'), 'ghost');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(await screen.findByText('No members matched that search.')).toBeInTheDocument();
+  });
+
+  it('shows an error state when the search fails', async () => {
+    const user = userEvent.setup();
+    mockedApi.searchGuildMembers.mockRejectedValue(
+      new ApiError(502, { error: 'guild_unavailable', message: 'The Discord guild is unavailable to the bot.' }),
+    );
+
+    render(<ModerationTab guildId="g1" />);
+    await user.type(screen.getByLabelText('Search by name or user ID'), 'some');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(
+      await screen.findByText('The Discord guild is unavailable to the bot.'),
+    ).toBeInTheDocument();
+  });
+
+  it('validates the query length before calling the API', async () => {
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+
+    await user.type(screen.getByLabelText('Search by name or user ID'), 'a');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(await screen.findByText('Search query must be at least 2 characters.')).toBeInTheDocument();
+    expect(mockedApi.searchGuildMembers).not.toHaveBeenCalled();
+  });
+
+  it('rejects a single-digit query without treating it as a snowflake', async () => {
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+
+    await user.type(screen.getByLabelText('Search by name or user ID'), '1');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(
+      await screen.findByText('Numeric search must be a full Discord user id (17-20 digits).'),
+    ).toBeInTheDocument();
+    expect(mockedApi.searchGuildMembers).not.toHaveBeenCalled();
+  });
+
+  it('rejects a short numeric query that is not a full snowflake', async () => {
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+
+    await user.type(screen.getByLabelText('Search by name or user ID'), '12');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(
+      await screen.findByText('Numeric search must be a full Discord user id (17-20 digits).'),
+    ).toBeInTheDocument();
+    expect(mockedApi.searchGuildMembers).not.toHaveBeenCalled();
+  });
+
+  it('calls the search API for a full Discord snowflake id', async () => {
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+
+    await user.type(screen.getByLabelText('Search by name or user ID'), '123456789012345678');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() => {
+      expect(mockedApi.searchGuildMembers).toHaveBeenCalledWith('g1', '123456789012345678', 10);
+    });
+  });
+
+  it('fills the target user id when a search result is selected', async () => {
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+
+    await user.type(screen.getByLabelText('Search by name or user ID'), 'some');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    const result = await screen.findByRole('button', { name: /Some User/ });
+    await user.click(result);
+
+    expect(screen.getByLabelText<HTMLInputElement>('Target Discord user ID').value).toBe(
+      '123456789012345678',
+    );
   });
 
   it('handles invalid fields without calling the API', async () => {

@@ -147,6 +147,55 @@ describe('GET requests', () => {
     });
     expect((auditLog.events[0] as unknown as Record<string, unknown>).operatorId).toBeUndefined();
   });
+
+  it('searches guild members without sending a CSRF token and drops internal fields', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        json: {
+          guildId: '9',
+          query: 'art',
+          limit: 10,
+          results: [
+            {
+              userId: '123456789012345678',
+              username: 'some_user',
+              displayName: 'Some User',
+              bot: false,
+              registeredGuildId: 'internal-guild-id',
+              role: 'OWNER',
+            },
+          ],
+        },
+      }),
+    );
+
+    const response = await api.searchGuildMembers('9', 'art', 10);
+
+    expect(urlOf(0)).toBe('/api/v1/guilds/9/moderation/members/search?query=art&limit=10');
+    const init = initOf(0);
+    expect(init.method).toBe('GET');
+    expect(init.credentials).toBe('include');
+    expect((init.headers as Record<string, string>)['X-CSRF-TOKEN']).toBeUndefined();
+    expect(response).toEqual({
+      guildId: '9',
+      query: 'art',
+      limit: 10,
+      results: [
+        { userId: '123456789012345678', username: 'some_user', displayName: 'Some User', bot: false },
+      ],
+    });
+    expect((response.results[0] as unknown as Record<string, unknown>).role).toBeUndefined();
+  });
+
+  it('omits the limit query parameter when not provided', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({ json: { guildId: '9', query: 'art', limit: 10, results: [] } }),
+    );
+
+    await api.searchGuildMembers('9', 'art');
+
+    expect(urlOf(0)).toBe('/api/v1/guilds/9/moderation/members/search?query=art');
+  });
 });
 
 describe('CSRF handling on state-changing requests', () => {
