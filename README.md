@@ -4,7 +4,7 @@ Guild OS is a platform for managing, automating, and analyzing online communitie
 
 ## Project status
 
-The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend and frontend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, synced Discord text/announcement channel metadata, a privacy-safe guild-scoped audit log, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, a safe member timeout moderation action foundation, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, an authorized hourly analytics API, a first React operator dashboard frontend for sign-in, onboarding, settings, moderation, analytics, audit-log review, and member-message automation, a small platform-neutral abstraction layer, and an experimental Telegram adapter proof of concept. Bot Gateway, human OAuth, and Telegram integrations are independently disabled by default. Discord remains the first complete adapter; the Telegram adapter is an early proof of concept that only answers `/ping` and does not yet onboard chats, authenticate operators, persist activity, or deliver welcome/goodbye messages. The frontend is an early foundation: real-time dashboards, advanced moderation workflows, AI features, billing, retention automation, and advanced analytics visualization are not implemented yet.
+The project is at the initial bootstrap stage. It provides a runnable Spring Boot service, PostgreSQL persistence foundation, Flyway migrations, real-database integration tests, local Docker Compose infrastructure, backend and frontend CI, a monitored Discord Gateway connection, a persistent guild registry, server-side operator authentication through Discord OAuth2, operator-to-guild authorization, persistent per-guild timezone and locale settings, synced Discord text/announcement channel metadata, a privacy-safe guild-scoped audit log, an ephemeral read-only Discord status command, persistent welcome/goodbye configuration and delivery, a safe member timeout moderation action foundation with a privacy-conscious live member search, durable privacy-conscious member/message activity ingestion, asynchronous PostgreSQL-backed processing, an authorized hourly analytics API, a first React operator dashboard frontend for sign-in, onboarding, settings, moderation, analytics, audit-log review, and member-message automation, a small platform-neutral abstraction layer, and an experimental Telegram adapter proof of concept. Bot Gateway, human OAuth, and Telegram integrations are independently disabled by default. Discord remains the first complete adapter; the Telegram adapter is an early proof of concept that only answers `/ping` and does not yet onboard chats, authenticate operators, persist activity, or deliver welcome/goodbye messages. The frontend is an early foundation: real-time dashboards, advanced moderation workflows, AI features, billing, retention automation, and advanced analytics visualization are not implemented yet.
 
 ## Technology stack
 
@@ -268,7 +268,30 @@ The `guildmoderation` capability owns request validation, the HTTP endpoint, orc
 
 Audit summaries are application-generated and generic. Guild OS does not store or expose the moderation reason, internal UUIDs, operator ids, OAuth/session/token data, raw Discord payloads, raw exception messages, message content, or Discord display names for this action. Adapter logs use bounded metadata only: action type, guild id, target user id, and failure category.
 
-Not implemented yet: member search, warnings, kick, ban, message deletion, moderation queues, AI moderation, appeal workflows, realtime moderation streams, moderation automation, or a dedicated moderation action history table beyond the guild audit log.
+### Member search foundation
+
+To help operators select a moderation target without memorizing raw ids, the moderation boundary exposes a live member lookup:
+
+```text
+GET /api/v1/guilds/{discordGuildId}/moderation/members/search?query={query}&limit={limit}
+```
+
+```json
+{
+  "guildId": "123456789012345678",
+  "query": "art",
+  "limit": 10,
+  "results": [
+    { "userId": "123456789012345678", "username": "some_user", "displayName": "Some User", "bot": false }
+  ]
+}
+```
+
+Member search is a **live, authenticated lookup, not a persisted member directory.** It uses the same operator-to-guild authorization boundary as the timeout action; unknown guilds, missing access, and revoked access return the same safe non-enumerating `404`. The `query` is required, trimmed, must be at least two characters unless it is a full Discord snowflake id (17-20 digits), and at most 64 characters; blank, short, and overlong queries return controlled `400` responses. A purely numeric query that is not a full snowflake (for example `1` or `12`) is rejected rather than run as a numeric prefix search, so a partial id cannot bypass the minimum-length rule. `limit` is optional, defaults to `10`, and is capped at `25`. A full snowflake performs an exact id lookup and returns at most one member; any other query performs a bounded text search by username/nickname/effective name (no `MESSAGE_CONTENT` or extra privileged intents required). No match returns an empty list.
+
+The `guildmoderation` capability owns validation, the HTTP endpoint, orchestration, safe DTOs, and the outbound port; JDA member resolution stays in the `discord` adapter and is not run inside a database transaction. Searches are read-only and **never create audit events.** Guild OS does not store member names, display names, avatar URLs, or search queries for this feature: the username/displayName fields are transient selection metadata resolved from Discord at request time. Adapter logs use bounded metadata only (guild id and failure category) and never usernames, display names, avatars, raw Discord payloads, or search terms.
+
+Not implemented yet: warnings, kick, ban, message deletion, moderation queues, AI moderation, appeal workflows, realtime moderation streams, moderation automation, a persistent member directory or member profile table, avatar storage, role management, Telegram member search, or a dedicated moderation action history table beyond the guild audit log.
 
 ## Durable activity ingestion and hourly analytics
 
@@ -545,7 +568,7 @@ The dashboard **preview never sends a message to Discord**: it renders determini
 
 ### Apply member timeouts from the dashboard
 
-The guild detail page includes a **Moderation** tab with a member-timeout form. It accepts a target Discord user id, a duration in minutes, and an optional bounded reason, then calls the CSRF-protected moderation endpoint described above. The UI has no member search yet because Guild OS does not persist member profile metadata. Successful actions appear in the guild audit log as generic member-timeout events; failed Discord actions return controlled error states and do not record success audit rows.
+The guild detail page includes a **Moderation** tab with a live member search above a member-timeout form. The search field performs an authenticated live lookup (by username, nickname, or Discord user id) and shows loading, empty, and error states; selecting a result fills the timeout target user id, and manual id entry remains available as a fallback. The timeout form accepts a target Discord user id, a duration in minutes, and an optional bounded reason, then calls the CSRF-protected moderation endpoint described above. Member search results are transient — the browser never persists member names or search terms, matching the backend, which stores no member profile metadata. Successful timeout actions appear in the guild audit log as generic member-timeout events; searches never create audit rows, and failed Discord actions return controlled error states.
 
 ### Review guild audit events
 

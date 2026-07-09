@@ -39,4 +39,16 @@ class GuildModerationService {
                 GuildAuditEventType.MEMBER_TIMEOUT_CREATED);
         return ModerationActionResponse.memberTimeout(access.discordGuildId(), command, result);
     }
+
+    MemberSearchResponse searchMembers(
+            UUID operatorId,
+            String discordGuildId,
+            String query,
+            Integer limit) {
+        AuthorizedGuildAccess access = authorizer.findActive(operatorId, discordGuildId)
+                .orElseThrow(ModerationAccessNotFoundException::new);
+        MemberSearchQuery searchQuery = MemberSearchQuery.of(access.discordGuildId(), query, limit);
+        MemberSearchResult result = discordClient.searchMembers(searchQuery);
+        return MemberSearchResponse.of(access.discordGuildId(), searchQuery, result);
+    }
 }

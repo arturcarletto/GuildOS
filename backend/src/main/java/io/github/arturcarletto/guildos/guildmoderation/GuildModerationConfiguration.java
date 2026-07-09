@@ -10,8 +10,16 @@ class GuildModerationConfiguration {
     @Bean
     @ConditionalOnMissingBean(GuildModerationDiscordClient.class)
     GuildModerationDiscordClient unavailableGuildModerationDiscordClient() {
-        return command -> {
-            throw new ModerationDiscordActionException(ModerationFailureCategory.DISCORD_UNAVAILABLE);
+        return new GuildModerationDiscordClient() {
+            @Override
+            public ModerationActionResult timeoutMember(TimeoutMemberCommand command) {
+                throw new ModerationDiscordActionException(ModerationFailureCategory.DISCORD_UNAVAILABLE);
+            }
+
+            @Override
+            public MemberSearchResult searchMembers(MemberSearchQuery query) {
+                throw new ModerationDiscordActionException(ModerationFailureCategory.DISCORD_UNAVAILABLE);
+            }
         };
     }
 }
