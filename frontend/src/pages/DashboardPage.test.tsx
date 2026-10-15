@@ -24,7 +24,7 @@ const mockedApi = vi.mocked(api);
 
 function renderDashboard(ui: ReactElement = <DashboardPage />) {
   return render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter>
       <AuthProvider>{ui}</AuthProvider>
     </MemoryRouter>,
   );

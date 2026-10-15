@@ -11,7 +11,6 @@ export function renderWithRouter(
     return (
       <MemoryRouter
         initialEntries={[route]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         {children}
       </MemoryRouter>

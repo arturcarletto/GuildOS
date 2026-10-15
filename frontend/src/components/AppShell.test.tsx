@@ -24,7 +24,6 @@ function renderApp(initialPath = '/dashboard') {
   return render(
     <MemoryRouter
       initialEntries={[initialPath]}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <AuthProvider>
         <Routes>
