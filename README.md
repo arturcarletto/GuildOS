@@ -536,7 +536,7 @@ The `frontend/` directory contains the first operator dashboard: a React + TypeS
 
 ### Prerequisites
 
-- Node.js LTS (Node 22 recommended) and npm.
+- Node.js satisfying the frontend engine constraint: 20.19+ on the 20.x line, 22.13+ on the 22.x line, or 24+. Local GUILD-021 checks used Node 24.19.0. npm is also required.
 
 ### Run the backend
 
@@ -585,6 +585,8 @@ npm run lint       # run ESLint
 ```
 
 Frontend CI (`.github/workflows/frontend-ci.yml`) runs `npm ci`, `npm run lint`, `npm run test`, and `npm run build` on Node 22 for pull requests targeting `main` and pushes to `main`, independently of the backend CI workflow.
+
+See the [GUILD-021 dependency security audit](docs/guild-021-dependency-security.md) for remediation, compatibility and residual risk, and the [GUILD-020 browser validation](docs/guild-020-activity-chart-validation.md) for real-browser checks with a simulated API and integration limits.
 
 ### Manage welcome/goodbye automation from the dashboard
 

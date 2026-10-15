@@ -142,6 +142,7 @@
 }
 
 .app-content {
+  min-width: 0;
   padding: 28px 28px 64px;
   width: 100%;
   max-width: var(--content-max);

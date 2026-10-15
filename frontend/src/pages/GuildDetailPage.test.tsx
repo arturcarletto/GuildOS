@@ -27,7 +27,6 @@ function renderPage() {
   return render(
     <MemoryRouter
       initialEntries={['/dashboard/guilds/123456789012345678']}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
         <Route path="/dashboard/guilds/:discordGuildId" element={<GuildDetailPage />} />
