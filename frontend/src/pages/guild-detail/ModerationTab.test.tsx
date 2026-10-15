@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, api } from '../../api/client';
 import type { ModerationCasesResponse } from '../../api/types';
@@ -302,5 +302,146 @@ describe('ModerationTab', () => {
     expect(screen.queryByText('internal-operator-id')).not.toBeInTheDocument();
     expect(screen.queryByText('raw reason')).not.toBeInTheDocument();
     expect(screen.queryByText('Some User')).not.toBeInTheDocument();
+  });
+});
+
+describe('Moderation case periods', () => {
+  const NOW = '2026-07-09T15:42:31.456Z';
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('defaults to All time and sends only the limit', async () => {
+    render(<ModerationTab guildId="g1" />);
+
+    expect(await screen.findByText('Member Timeout Created')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All time' })).toHaveAttribute('aria-pressed', 'true');
+    expect(mockedApi.getModerationCases).toHaveBeenCalledTimes(1);
+    expect(mockedApi.getModerationCases).toHaveBeenCalledWith('g1', { limit: 50 });
+  });
+
+  it.each([
+    ['Last 7 days', '2026-07-02T15:42:31.456Z'],
+    ['Last 30 days', '2026-06-09T15:42:31.456Z'],
+  ])('requests %s with exact UTC milliseconds and no upper bound', async (label, from) => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse(NOW));
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+    await screen.findByText('Member Timeout Created');
+
+    await user.click(screen.getByRole('button', { name: label }));
+
+    await waitFor(() => {
+      expect(mockedApi.getModerationCases).toHaveBeenLastCalledWith('g1', { limit: 50, from });
+    });
+    expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('removes the temporal filter when returning to All time', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse(NOW));
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+    await screen.findByText('Member Timeout Created');
+
+    await user.click(screen.getByRole('button', { name: 'Last 7 days' }));
+    await waitFor(() => {
+      expect(mockedApi.getModerationCases).toHaveBeenLastCalledWith('g1', {
+        limit: 50, from: '2026-07-02T15:42:31.456Z',
+      });
+    });
+    await user.click(screen.getByRole('button', { name: 'All time' }));
+
+    await waitFor(() => {
+      expect(mockedApi.getModerationCases).toHaveBeenLastCalledWith('g1', { limit: 50 });
+    });
+    expect(screen.getByRole('button', { name: 'All time' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('recalculates the active period on retry and recovers from an error', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(NOW));
+    mockedApi.getModerationCases
+      .mockResolvedValueOnce(CASE_HISTORY)
+      .mockRejectedValueOnce(new ApiError(500, { error: 'server_error' }))
+      .mockResolvedValueOnce(CASE_HISTORY);
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+    await screen.findByText('Member Timeout Created');
+
+    await user.click(screen.getByRole('button', { name: 'Last 7 days' }));
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    now.mockReturnValue(Date.parse('2026-07-09T16:03:42.789Z'));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() => {
+      expect(mockedApi.getModerationCases).toHaveBeenLastCalledWith('g1', {
+        limit: 50, from: '2026-07-02T16:03:42.789Z',
+      });
+    });
+    expect(await screen.findByText('Member Timeout Created')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Last 7 days' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it.each([
+    ['Last 7 days', '2026-07-02T16:03:42.789Z'],
+    ['Last 30 days', '2026-06-09T16:03:42.789Z'],
+  ])('refreshes %s after a timeout with a newly calculated lower bound', async (label, from) => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(NOW));
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+    await screen.findByText('Member Timeout Created');
+
+    await user.click(screen.getByRole('button', { name: label }));
+    await waitFor(() => expect(mockedApi.getModerationCases).toHaveBeenCalledTimes(2));
+    await user.type(screen.getByLabelText('Target Discord user ID'), '123456789012345678');
+    now.mockReturnValue(Date.parse('2026-07-09T16:03:42.789Z'));
+    await user.click(screen.getByRole('button', { name: 'Apply timeout' }));
+
+    expect(await screen.findByText('Member timeout created for 123456789012345678.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockedApi.getModerationCases).toHaveBeenCalledTimes(3);
+      expect(mockedApi.getModerationCases).toHaveBeenLastCalledWith('g1', { limit: 50, from });
+    });
+    expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('preserves loading and shows a period-specific empty state', async () => {
+    let resolveCases: (value: ModerationCasesResponse) => void = () => {};
+    mockedApi.getModerationCases
+      .mockResolvedValueOnce(CASE_HISTORY)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveCases = resolve; }));
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+    await screen.findByText('Member Timeout Created');
+
+    await user.click(screen.getByRole('button', { name: 'Last 30 days' }));
+    expect(await screen.findByText('Loading moderation cases...')).toBeInTheDocument();
+    expect(screen.queryByText('Member Timeout Created')).not.toBeInTheDocument();
+    resolveCases({ guildId: 'g1', cases: [] });
+
+    expect(await screen.findByText('No moderation cases in this period.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Last 30 days' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('ignores a late response from the previously selected period', async () => {
+    let resolveOlder: (value: ModerationCasesResponse) => void = () => {};
+    mockedApi.getModerationCases
+      .mockResolvedValueOnce(CASE_HISTORY)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOlder = resolve; }))
+      .mockResolvedValueOnce({
+        guildId: 'g1',
+        cases: [{ ...CASE_HISTORY.cases[0], summary: 'Current period result.' }],
+      });
+    const user = userEvent.setup();
+    render(<ModerationTab guildId="g1" />);
+    await screen.findByText('Member Timeout Created');
+
+    await user.click(screen.getByRole('button', { name: 'Last 7 days' }));
+    await user.click(screen.getByRole('button', { name: 'Last 30 days' }));
+    expect(await screen.findByText('Current period result.')).toBeInTheDocument();
+    await act(async () => { resolveOlder(CASE_HISTORY); });
+
+    expect(screen.getByText('Current period result.')).toBeInTheDocument();
+    expect(screen.queryByText('Member timeout completed.')).not.toBeInTheDocument();
   });
 });

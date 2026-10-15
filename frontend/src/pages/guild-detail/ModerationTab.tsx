@@ -12,6 +12,7 @@ import { describeError, useAsync } from '../../hooks/useAsync';
 
 type Feedback = { tone: 'success' | 'error'; message: string } | null;
 type SearchState = 'idle' | 'loading' | 'loaded' | 'error';
+type CasePeriod = 'all' | '7d' | '30d';
 
 // A full Discord user id is 17-20 digits. It is the only value that may bypass
 // the text-search minimum length; a shorter numeric query is not a valid
@@ -24,6 +25,12 @@ const MIN_SEARCH_LENGTH = 2;
 const MAX_SEARCH_LENGTH = 64;
 const SEARCH_LIMIT = 10;
 const CASE_LIMIT = 50;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CASE_PERIODS: { value: CasePeriod; label: string }[] = [
+  { value: 'all', label: 'All time' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+];
 
 export default function ModerationTab({ guildId }: { guildId: string }) {
   const [targetUserId, setTargetUserId] = useState('');
@@ -37,11 +44,17 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
   const [searchError, setSearchError] = useState('');
   const [results, setResults] = useState<MemberSearchResultMember[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [casePeriod, setCasePeriod] = useState<CasePeriod>('all');
   const loadCases = useCallback(
-    () => api.getModerationCases(guildId, { limit: CASE_LIMIT }),
-    [guildId],
+    () => api.getModerationCases(guildId, {
+      limit: CASE_LIMIT,
+      ...(casePeriod === 'all' ? {} : {
+        from: new Date(Date.now() - (casePeriod === '7d' ? 7 : 30) * DAY_MS).toISOString(),
+      }),
+    }),
+    [guildId, casePeriod],
   );
-  const caseHistory = useAsync<ModerationCasesResponse>(loadCases, [guildId]);
+  const caseHistory = useAsync<ModerationCasesResponse>(loadCases, [guildId, casePeriod]);
 
   const handleSearch = async (event: FormEvent) => {
     event.preventDefault();
@@ -282,6 +295,8 @@ export default function ModerationTab({ guildId }: { guildId: string }) {
         loading={caseHistory.loading}
         error={caseHistory.error}
         onRetry={caseHistory.reload}
+        period={casePeriod}
+        onPeriodChange={setCasePeriod}
       />
     </div>
   );
@@ -292,11 +307,15 @@ function ModerationCaseHistory({
   loading,
   error,
   onRetry,
+  period,
+  onPeriodChange,
 }: {
   cases: ModerationCase[];
   loading: boolean;
   error: Error | null;
   onRetry: () => void;
+  period: CasePeriod;
+  onPeriodChange: (period: CasePeriod) => void;
 }) {
   return (
     <div className="card card--pad">
@@ -305,10 +324,27 @@ function ModerationCaseHistory({
         <span className="badge badge--role">Read only</span>
       </div>
 
+      <div role="group" aria-label="Moderation case period" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        {CASE_PERIODS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={`btn btn--sm ${period === option.value ? 'btn--primary' : 'btn--ghost'}`}
+            aria-pressed={period === option.value}
+            onClick={() => onPeriodChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <p className="muted" style={{ marginBottom: 14 }}>
+        Up to 50 most recent cases. Relative periods are recalculated when results refresh.
+      </p>
+
       {loading ? <LoadingState label="Loading moderation cases..." /> : null}
       {!loading && error ? <ErrorState message={describeError(error)} onRetry={onRetry} /> : null}
       {!loading && !error && cases.length === 0 ? (
-        <EmptyState title="No moderation cases yet." />
+        <EmptyState title={period === 'all' ? 'No moderation cases yet.' : 'No moderation cases in this period.'} />
       ) : null}
       {!loading && !error && cases.length > 0 ? <ModerationCaseTable cases={cases} /> : null}
     </div>
