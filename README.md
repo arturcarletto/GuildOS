@@ -378,6 +378,8 @@ Example response shape:
 }
 ```
 
+The dashboard Activity tab adds a native SVG bar chart of messages created between the summary cards and the existing hourly table. It reuses the analytics response: intervals up to 24 hours use hourly bars; longer intervals use UTC calendar-day totals within the response's inclusive-from/exclusive-to bounds, with partial edge days marked. Missing hours contribute zero recorded events, not evidence of healthy ingestion. The 31-day maximum can span 32 UTC dates. The plot scrolls horizontally on narrow screens and provides expandable exact values; loading, retry, empty states, authorization, and the hourly table are preserved.
+
 Activity processor configuration uses bounded, non-secret properties:
 
 ```bash

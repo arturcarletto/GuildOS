@@ -13,6 +13,7 @@ import {
 import { formatCount, formatUtcHour } from '../../components/format';
 import { Banner, EmptyState, ErrorState, LoadingState } from '../../components/states';
 import { describeError, useAsync } from '../../hooks/useAsync';
+import ActivityMessagesChart from './ActivityMessagesChart';
 
 type Preset = '24h' | '7d' | 'custom';
 
@@ -39,12 +40,6 @@ export default function ActivityTab({ guildId }: { guildId: string }) {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [customError, setCustomError] = useState<string | null>(null);
-
-  const load = useCallback(
-    () => api.getActivityAnalytics(guildId, range.from, range.to),
-    [guildId, range.from, range.to],
-  );
-  const analytics = useAsync<ActivityAnalytics>(load, [guildId, range.from, range.to]);
 
   const selectPreset = (next: Preset) => {
     setPreset(next);
@@ -155,6 +150,21 @@ export default function ActivityTab({ guildId }: { guildId: string }) {
         </p>
       </div>
 
+      <ActivityResults key={JSON.stringify([guildId, range.from, range.to])} guildId={guildId} range={range} />
+    </div>
+  );
+}
+
+// Remount per request identity so even already-loaded data cannot leak across guilds/ranges.
+function ActivityResults({ guildId, range }: { guildId: string; range: Range }) {
+  const load = useCallback(
+    () => api.getActivityAnalytics(guildId, range.from, range.to),
+    [guildId, range.from, range.to],
+  );
+  const analytics = useAsync<ActivityAnalytics>(load, [guildId, range.from, range.to]);
+
+  return (
+    <>
       {analytics.loading ? (
         <div className="card">
           <LoadingState label="Loading analytics…" />
@@ -166,7 +176,7 @@ export default function ActivityTab({ guildId }: { guildId: string }) {
       ) : analytics.data ? (
         <AnalyticsResult data={analytics.data} />
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -182,6 +192,7 @@ function PresetButton({
   return (
     <button
       type="button"
+      aria-pressed={active}
       className={`btn btn--sm ${active ? 'btn--primary' : 'btn--ghost'}`}
       onClick={onClick}
     >
@@ -219,6 +230,8 @@ function AnalyticsResult({ data }: { data: ActivityAnalytics }) {
         ))}
       </div>
 
+      {hasData ? <ActivityMessagesChart data={data} /> : null}
+
       <div>
         <h3 className="section__title" style={{ marginBottom: 4 }}>
           Hourly buckets
@@ -244,7 +257,7 @@ function AnalyticsResult({ data }: { data: ActivityAnalytics }) {
           </div>
         ) : (
           <div className="table-wrap">
-            <table className="data">
+            <table className="data" aria-label="Hourly activity buckets">
               <thead>
                 <tr>
                   <th scope="col">Hour (UTC)</th>
