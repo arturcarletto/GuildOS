@@ -45,6 +45,51 @@ function urlOf(call: number): string {
 }
 
 describe('GET requests', () => {
+
+  it('requests activity analytics with encoded UTC bounds and parses only public counters', async () => {
+    const from = '2026-07-01T10:00:00Z';
+    const to = '2026-07-02T10:00:00Z';
+    fetchMock.mockResolvedValueOnce(mockResponse({ json: {
+      guildId: '42', from, to, bucketTimezone: 'UTC',
+      internalGuildId: 'private-db-id',
+      summary: { messagesCreated: 7, humanMessages: 5, botMessages: 2, internalCount: 99 },
+      buckets: [null, {}, {
+        startedAt: from, messagesCreated: 7, humanMessages: 5, botMessages: 2,
+        distinctMessagesEdited: 1, messagesDeleted: 2, membersJoined: 3, membersLeft: 4,
+        activeMembers: 5, activeChannels: 6, userId: 'not-a-public-field',
+      }],
+    } }));
+    const result = await api.getActivityAnalytics('42', from, to);
+    expect(urlOf(0)).toBe('/api/v1/guilds/42/analytics/activity?from=2026-07-01T10%3A00%3A00Z&to=2026-07-02T10%3A00%3A00Z');
+    expect(initOf(0).method).toBe('GET');
+    expect(initOf(0).credentials).toBe('include');
+    expect((initOf(0).headers as Record<string, string>)['X-CSRF-TOKEN']).toBeUndefined();
+    expect(result).toEqual({
+      guildId: '42', from, to, bucketTimezone: 'UTC',
+      summary: {
+        messagesCreated: 7, humanMessages: 5, botMessages: 2, distinctMessagesEdited: 0,
+        messagesDeleted: 0, membersJoined: 0, membersLeft: 0,
+        peakHourlyActiveMembers: 0, peakHourlyActiveChannels: 0,
+      },
+      buckets: [{
+        startedAt: from, messagesCreated: 7, humanMessages: 5, botMessages: 2,
+        distinctMessagesEdited: 1, messagesDeleted: 2, membersJoined: 3, membersLeft: 4,
+        activeMembers: 5, activeChannels: 6,
+      }],
+    });
+  });
+
+  it('parses an empty activity response without inventing buckets', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ json: {
+      guildId: '42', from: '2026-07-01T00:00:00Z', to: '2026-07-02T00:00:00Z',
+      bucketTimezone: 'UTC', summary: {}, buckets: [],
+    } }));
+    const result = await api.getActivityAnalytics('42', '2026-07-01T00:00:00Z', '2026-07-02T00:00:00Z');
+    expect(result.buckets).toEqual([]);
+    expect(result.summary.messagesCreated).toBe(0);
+  });
+
+
   it('includes credentials and never sends a CSRF token', async () => {
     fetchMock.mockResolvedValueOnce(
       mockResponse({ json: [{ guildId: '1', name: 'Alpha', role: 'OWNER' }] }),
